@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>품질불량 이력 분석 도구</title>
+  <meta name="description" content="품질불량 이력 Excel을 열 맞추기로 가져와 품번·불량유형·원인별로 관리하고, 유사 불량 검색·반복 불량 탐지·월간 현황·대책서 초안 프롬프트를 만드는 브라우저 도구(1단계 시연판)">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">본문으로 건너뛰기</a>
+  <header class="site-header">
+    <div class="inner header-inner">
+      <a class="brand" href="#/list">
+        <span class="brand-name">품질불량 이력 분석 도구</span>
+        <span class="brand-sub">이력 관리 · 유사 불량 검색 · 반복 탐지 · 월간 현황 · 대책서 초안</span>
+      </a>
+      <nav class="nav" id="nav" aria-label="주 메뉴">
+        <a href="#/list" data-route="list">품질 이력</a>
+        <a href="#/dict" data-route="dict">표기 정리</a>
+        <a href="#/search" data-route="search">유사 불량</a>
+        <a href="#/repeat" data-route="repeat">반복·다발</a>
+        <a href="#/monthly" data-route="monthly">월간 현황</a>
+        <a href="#/draft" data-route="draft">대책서 초안</a>
+      </nav>
+    </div>
+  </header>
+
+  <div id="sampleBanner" class="sample-banner" hidden>지금 보이는 것은 <strong>예시 데이터</strong>입니다. 실제 품질 이력이 아닌 가상의 값입니다.</div>
+  <div id="storeBanner" class="store-banner" hidden>이 브라우저에서는 저장소를 쓸 수 없어, 창을 닫으면 데이터가 사라집니다. 작업 후 Excel로 내보내 두세요.</div>
+
+  <main id="main" class="inner main" tabindex="-1"></main>
+
+  <footer class="site-footer">
+    <div class="inner">1단계 시연판 · 파일은 서버로 보내지 않고 이 브라우저 안에서만 계산·저장합니다</div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="dialog" class="dialog">
+    <form method="dialog" class="dialog-body" id="dialogForm">
+      <h2 id="dialogTitle"></h2>
+      <div id="dialogContent"></div>
+      <div class="dialog-actions" id="dialogActions"></div>
+    </form>
+  </dialog>
+
+  <!-- 로컬 파일(file://)로 열어도 돌도록 module 이 아닌 일반 스크립트로 불러옵니다 -->
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="js/logic.js"></script>
+  <script src="js/sample-data.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
