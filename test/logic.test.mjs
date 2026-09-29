@@ -209,4 +209,35 @@ test('예시 데이터에 반복 불량과 표기 흔들림이 들어 있음', (
   assert.ok(!causes.includes('작업 자') && !causes.includes('작업자 실수'));
 });
 
+console.log('다음 단계 요약 글');
+test('요약 글: 열 이름·건수·기간·유형은 넣고, 품번·고객사·원인·대책 값은 넣지 않음', () => {
+  const rows = [
+    row({ date: '2026-01-05', part_no: 'PN-SECRET-1', customer: '비밀고객사', defect_type: '스크래치', cause: '금형마모원인문장', action: '대책문장비공개', qty: 3 }),
+    row({ date: '2026-03-20', part_no: 'PN-SECRET-2', customer: '비밀고객사', defect_type: '스크래치', cause: '금형마모원인문장', action: '대책문장비공개' }),
+    row({ date: '2026-02-11', part_no: 'PN-SECRET-1', defect_type: '찍힘' })
+  ];
+  const txt = L.readinessSummary(rows, { mapping: { date: '일자', part_no: 'P/N', defect_type: '불량 구분' }, headers: ['일자', 'P/N', '불량 구분', '비고'] });
+  assert.match(txt, /3건, 기간 2026-01-05 ~ 2026-03-20 \(3개월\)/);
+  assert.match(txt, /열 이름: 일자, P\/N, 불량 구분, 비고/);
+  assert.match(txt, /발생일 ← 일자/);
+  assert.match(txt, /연결하지 않은 열: 비고/);
+  assert.match(txt, /파일에 없던 표준 항목: 관리번호, 품명/);
+  assert.match(txt, /불량유형 2가지\(건수 많은 순\): 스크래치 2, 찍힘 1/);
+  for (const secret of ['PN-SECRET', '비밀고객사', '금형마모원인문장', '대책문장비공개']) assert.ok(!txt.includes(secret), secret + ' 가 새어 나감');
+  assert.equal((txt.match(/^   \d+\) /gm) || []).length, L.PLAN_QUESTIONS.length);
+  assert.equal(L.PLAN_QUESTIONS.length, 10);
+});
+test('요약 글: 빈 이력·예시 데이터 표시', () => {
+  const t0 = L.readinessSummary([], {});
+  assert.match(t0, /이력 규모: 0건\n/);
+  assert.match(t0, /아직 불러온 파일 없음/);
+  assert.ok(!/파일에 없던 표준 항목/.test(t0));
+  assert.match(L.readinessSummary([], { sample: true }), /예시 데이터입니다/);
+});
+test('다음 단계 체크 목록: 키 중복 없음, 두 묶음', () => {
+  const keys = L.NEXT_CHECKLIST.map(c => c.key);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.deepEqual([...new Set(L.NEXT_CHECKLIST.map(c => c.group))], ['now', 'send']);
+});
+
 console.log('\n' + passed + '개 통과' + (process.exitCode ? ' — 실패 있음' : ''));

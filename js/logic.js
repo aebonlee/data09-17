@@ -536,6 +536,66 @@
     return '﻿' + aoa.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n');
   }
 
+  // ── 다음 단계 준비 ───────────────────────────────────────────
+  // 2단계(실제 데이터 보정·문서 검색·사진)로 가려면 수강생에게 받아야 할 것들.
+  // 화면 「다음 단계」의 체크 목록과 「보낼 요약 글」이 이 목록을 씁니다.
+  var PLAN_QUESTIONS = [
+    '이력 Excel 의 열 구성·시트 구성, 한 행이 불량 1건인지',
+    '이력 건수와 기간(대략 몇 년치, 몇 건)',
+    '개선대책서·재발방지대책 파일 형식(한글·Word·Excel·PDF)',
+    '「품질 관련 Excel 관리자료」가 이력과 다른 파일이면 무엇을 관리하는지',
+    '불량유형·원인 분류 체계(코드표가 있는지, 자유 기재인지)',
+    '「반복·다발 불량」으로 보는 기준(기간·건수·같은 품번만인지)',
+    '월간 보고서 KPI 항목과 계산식(불량률 분모 — 생산 수량 자료가 있는지)',
+    '불량 사진과 이력을 잇는 키(관리번호 등)가 있는지, 사진 보관 위치',
+    '품질 이력·대응자료를 외부 AI·클라우드에 올려도 되는지, 사내 허용 AI',
+    '혼자 쓰는지, 품질팀이 함께 쓰는지'
+  ];
+  var NEXT_CHECKLIST = [
+    { key: 'try_import', group: 'now', label: '실제 이력 Excel 을 「Excel·CSV 불러오기」로 열고 「열 맞추기」까지 해 보기' },
+    { key: 'try_search', group: 'now', label: '「유사 불량」「반복·다발」「월간 현황」을 실제 이력으로 써 보기' },
+    { key: 'note_misfit', group: 'now', label: '안 맞았던 점 적어 두기(못 읽은 날짜·수량, 없는 열, 엉뚱한 검색 결과 등)' },
+    { key: 'answers', group: 'send', label: '기획서 10장 질문 10개에 답하기' },
+    { key: 'excel', group: 'send', label: '가린 Excel 샘플 10~20행, 또는 열 이름 목록(아래 「요약 글 만들기」)' },
+    { key: 'photos', group: 'send', label: '불량유형별로 나눈 불량 사진 — 유형마다 20장 이상(가능하면 50장), 정상품 사진도 함께' },
+    { key: 'docs', group: 'send', label: '개선대책서·재발방지대책 3~5건과 사내 표준(검사기준서·작업표준서 등) 목록' }
+  ];
+  // 이력에서 「보낼 요약 글」을 만듭니다. 열 이름·건수·기간·불량유형 이름·검사 결과만 넣고,
+  // 품번·품명·고객사·원인·대책 같은 값은 넣지 않습니다(공개 게시판에 올릴 수 있게).
+  function readinessSummary(rows, opt) {
+    opt = opt || {};
+    var mapping = opt.mapping || {}, headers = opt.headers || [];
+    var out = [];
+    out.push('[다음 단계 준비 요약 — 품질불량 이력 분석 도구에서 만든 글]');
+    out.push('※ 품번·품명·고객사·원인·대책 값은 넣지 않았습니다. 올리기 전에 한 번 읽어 보세요.');
+    if (opt.sample) out.push('※ 지금 도구에 든 것은 예시 데이터입니다. 실제 이력을 불러온 뒤 다시 만들어 주세요.');
+    out.push('');
+    var dates = rows.map(function (r) { return r.date; }).filter(Boolean).sort();
+    out.push('1. 이력 규모: ' + rows.length + '건' + (dates.length ? ', 기간 ' + dates[0] + ' ~ ' + dates[dates.length - 1] + ' (' + monthRange(monthOf(dates[0]), monthOf(dates[dates.length - 1])).length + '개월)' : ''));
+    out.push('2. 내 파일의 열 이름: ' + (headers.length ? headers.join(', ') : '(아직 불러온 파일 없음)'));
+    var linked = STD_FIELDS.filter(function (f) { return mapping[f.key]; });
+    if (linked.length) out.push('   - 연결한 열: ' + linked.map(function (f) { return f.label + ' ← ' + mapping[f.key]; }).join(', '));
+    var used = {};
+    Object.keys(mapping).forEach(function (k) { used[mapping[k]] = true; });
+    var extra = headers.filter(function (hd) { return !used[hd]; });
+    if (extra.length) out.push('   - 연결하지 않은 열: ' + extra.join(', '));
+    if (headers.length) {
+      var missing = STD_FIELDS.filter(function (f) { return !mapping[f.key]; }).map(function (f) { return f.label; });
+      out.push('   - 파일에 없던 표준 항목: ' + (missing.length ? missing.join(', ') : '없음'));
+    }
+    var types = groupCount(rows, 'defect_type');
+    out.push('3. 불량유형 ' + types.filter(function (g) { return g.key !== '(비어 있음)'; }).length + '가지(건수 많은 순): ' +
+      (types.length ? types.slice(0, 20).map(function (g) { return g.key + ' ' + g.count; }).join(', ') + (types.length > 20 ? ' 외 ' + (types.length - 20) + '가지' : '') : '(없음)'));
+    var s = issueSummary(validateRows(rows));
+    out.push('4. 도구 검사 결과: 오류 ' + s.error + '건 · 확인 ' + s.warn + '건');
+    out.push('5. 써 보니 안 맞았던 점: (적어 주세요)');
+    out.push('6. 기획서 10장 질문 답:');
+    PLAN_QUESTIONS.forEach(function (q, i) { out.push('   ' + (i + 1) + ') ' + q + ' → '); });
+    out.push('7. 불량 사진: 유형별 장수 (예: 스크래치 30장, 찍힘 25장, 정상 40장) → ');
+    out.push('8. 보낼 수 있는 문서: 대책서 몇 건·형식, 사내 표준 이름 → ');
+    return out.join('\n');
+  }
+
   var api = {
     STD_FIELDS: STD_FIELDS, FIELD: FIELD, DICT_FIELDS: DICT_FIELDS, GROUP_BY: GROUP_BY, DEFAULT_RULE: DEFAULT_RULE,
     DEFAULT_SEARCH: DEFAULT_SEARCH, DRAFT_SECTIONS: DRAFT_SECTIONS,
@@ -548,7 +608,8 @@
     monthRange: monthRange, monthlyTotals: monthlyTotals, monthReport: monthReport, prevMonth: prevMonth,
     buildPrompt: buildPrompt, parseDraft: parseDraft,
     stdHeader: stdHeader, standardSheet: standardSheet, templateSheets: templateSheets, monthlySheets: monthlySheets,
-    repeatsSheet: repeatsSheet, aoaToCsv: aoaToCsv
+    repeatsSheet: repeatsSheet, aoaToCsv: aoaToCsv,
+    PLAN_QUESTIONS: PLAN_QUESTIONS, NEXT_CHECKLIST: NEXT_CHECKLIST, readinessSummary: readinessSummary
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.QCLogic = api;

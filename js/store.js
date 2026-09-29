@@ -27,6 +27,8 @@
       if (p.search && typeof p.search === 'object') db.search = Object.assign({}, L.DEFAULT_SEARCH, p.search);
       if (p.draft && typeof p.draft === 'object') db.draft = p.draft;
       if (typeof p.seq === 'number') db.seq = p.seq;
+      if (Array.isArray(p.headers)) db.headers = p.headers.filter(function (x) { return typeof x === 'string'; });
+      if (p.nextChecks && typeof p.nextChecks === 'object') db.nextChecks = p.nextChecks;
       if (p._sample) db._sample = true;
     } catch (e) { /* 깨진 값은 무시하고 빈 DB */ }
     return db;
