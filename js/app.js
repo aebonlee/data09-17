@@ -482,7 +482,7 @@
       sv('path', { d: 'M150 200 L150 170 L230 140 L290 152 L350 110 L410 124 L470 84 L520 92 L520 200 Z', fill: '#8fb8ff', 'fill-opacity': '.08' }));
     return h('section', { class: 'hero' }, art,
       h('div', { class: 'hero-text' },
-        h('h1', null, '안녕하세요, 품질팀입니다.'),
+        h('h1', null, '안녕하세요, 천일테크윈 품질팀입니다.'),
         h('p', null, '품질 데이터를 분석해 더 빠르고 정확한 품질 대응을 돕습니다.')),
       h('label', { class: 'hero-month' }, icon('cal'), h('span', { class: 'sr' }, '볼 달'), sel));
   }
