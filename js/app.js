@@ -5,6 +5,7 @@
   var S = window.QCStore;
   var Sample = window.QCSample;
   var XLSX = window.XLSX;
+  var P = window.QCPhotos;
   var PAGE = 50;
 
   var db = S.loadDb();
@@ -52,6 +53,79 @@
     toast._t = setTimeout(function () { t.hidden = true; }, 3500);
   }
   function save() { if (!S.saveDb(db)) document.getElementById('storeBanner').hidden = false; }
+
+  // ── 사진 (2026-09-30) ─────────────────────────────────────
+  // 본체는 IndexedDB(js/photos.js), 이력 행에는 row.photos = [{ id, name, w, h, bytes, memo }] 만 둡니다.
+  var thumbUrls = {};          // 사진 id → 작은 그림 objectURL (한 번 만든 것은 다시 씁니다)
+  var pendingPhotos = {};      // 건 추가·고치기 창에서 넣었지만 아직 저장 전인 사진 id (정리에서 빼 둡니다)
+  var photoStoreWarned = false;
+  function thumbUrl(id) {
+    if (thumbUrls[id]) return Promise.resolve(thumbUrls[id]);
+    return P.get(id).then(function (rec) {
+      if (!rec) return '';
+      thumbUrls[id] = URL.createObjectURL(rec.thumb || rec.blob);
+      return thumbUrls[id];
+    }, function () { return ''; });
+  }
+  function forgetThumbs(ids) { ids.forEach(function (id) { if (thumbUrls[id]) { URL.revokeObjectURL(thumbUrls[id]); delete thumbUrls[id]; } }); }
+  function dropPhotos(ids) { if (!ids.length) return Promise.resolve(); forgetThumbs(ids); return P.del(ids).catch(function () {}); }
+  // 이력에서 가리키지 않는 사진(지운 건, 저장하지 않고 닫은 편집)을 지웁니다.
+  function gcPhotos() {
+    return P.keys().then(function (ks) {
+      return dropPhotos(L.orphanPhotoIds(db.rows, ks || [], Object.keys(pendingPhotos)));
+    }).catch(function () {});
+  }
+  function clearPhotos() { forgetThumbs(Object.keys(thumbUrls)); return P.clear().catch(function () {}); }
+  // 작은 그림 칸: 비어 있는 img 를 먼저 그리고, IndexedDB 에서 읽히면 채웁니다.
+  function thumbImg(id, alt) {
+    var img = h('img', { class: 'thumb', alt: alt || '불량 사진', loading: 'lazy', width: '56', height: '56' });
+    thumbUrl(id).then(function (u) { if (u) img.src = u; else img.classList.add('thumb-missing'); });
+    return img;
+  }
+  function photoThumbCell(raw) {
+    var ps = L.photosOf(raw);
+    if (!ps.length) return h('td', { class: 'photo-cell' }, h('span', { class: 'sr' }, '사진 없음'));
+    return h('td', { class: 'photo-cell' }, h('button', { type: 'button', class: 'thumb-btn', 'aria-label': '사진 ' + ps.length + '장 크게 보기',
+      onclick: function (e) { e.stopPropagation(); openLightbox(raw, 0); }, onkeydown: function (e) { e.stopPropagation(); } },
+      thumbImg(ps[0].id, rowTitle(raw) + ' 사진 1'), ps.length > 1 ? h('span', { class: 'thumb-count' }, '+' + (ps.length - 1)) : null));
+  }
+
+  // 사진 크게 보기 — 이력 목록과 건 고치기 창에서 씁니다. list 는 [{ id, name, memo }]
+  var lb = { list: [], i: 0, url: '', title: '' };
+  function openLightbox(rowOrList, i, title) {
+    lb.list = Array.isArray(rowOrList) ? rowOrList : L.photosOf(rowOrList);
+    lb.title = title || (Array.isArray(rowOrList) ? '' : rowTitle(rowOrList));
+    lb.i = Math.max(0, Math.min(i || 0, lb.list.length - 1));
+    var d = document.getElementById('lightbox');
+    if (!lb.list.length) return;
+    showLightbox();
+    if (!d.open) d.showModal();
+  }
+  function showLightbox() {
+    var p = lb.list[lb.i], img = document.getElementById('lbImg');
+    document.getElementById('lbTitle').textContent = lb.title || '불량 사진';
+    document.getElementById('lbCap').textContent = (lb.i + 1) + ' / ' + lb.list.length + (p.memo ? ' · ' + p.memo : '') + (p.name ? ' · ' + p.name : '');
+    document.getElementById('lbPrev').disabled = lb.i === 0;
+    document.getElementById('lbNext').disabled = lb.i >= lb.list.length - 1;
+    img.removeAttribute('src'); img.alt = '불량 사진 ' + (lb.i + 1);
+    P.get(p.id).then(function (rec) {
+      if (lb.url) URL.revokeObjectURL(lb.url);
+      lb.url = rec ? URL.createObjectURL(rec.blob) : '';
+      if (lb.url) img.src = lb.url; else img.alt = '사진을 찾지 못했습니다';
+    });
+  }
+  (function () {
+    var d = document.getElementById('lightbox');
+    document.getElementById('lbPrev').addEventListener('click', function () { if (lb.i > 0) { lb.i--; showLightbox(); } });
+    document.getElementById('lbNext').addEventListener('click', function () { if (lb.i < lb.list.length - 1) { lb.i++; showLightbox(); } });
+    document.getElementById('lbClose').addEventListener('click', function () { d.close(); });
+    d.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowLeft' && lb.i > 0) { lb.i--; showLightbox(); }
+      else if (e.key === 'ArrowRight' && lb.i < lb.list.length - 1) { lb.i++; showLightbox(); }
+    });
+    d.addEventListener('click', function (e) { if (e.target === d) d.close(); }); // 바깥(어두운 곳)을 누르면 닫기
+    d.addEventListener('close', function () { if (lb.url) { URL.revokeObjectURL(lb.url); lb.url = ''; } });
+  })();
   function field(label, input, hint) {
     return h('label', { class: 'field' }, h('span', null, label), input, hint ? h('small', { class: 'hint' }, hint) : null);
   }
@@ -72,6 +146,8 @@
     if (!d.open) d.showModal();
   }
   function closeDialog() { var d = document.getElementById('dialog'); if (d.open) d.close(); }
+  var onDialogClose = null;   // 창이 어떻게 닫히든(Esc 포함) 한 번 부릅니다
+  document.getElementById('dialog').addEventListener('close', function () { var f = onDialogClose; onDialogClose = null; if (f) f(); });
   function download(name, blob) {
     var a = h('a', { href: URL.createObjectURL(blob), download: name });
     document.body.appendChild(a); a.click();
@@ -160,12 +236,12 @@
       Object.assign(db.dict.cause_cat, Sample.dictHint);
       Object.assign(db.dict.defect_type, Sample.typeHint);
       db._sample = true;
-      save(); closeDialog();
+      save(); closeDialog(); clearPhotos();
       toast('예시 데이터 ' + db.rows.length + '건을 불러왔습니다');
       if (route() !== 'list') location.hash = '#/list'; else render();
     }
     if (db.rows.length && !db._sample) {
-      openDialog('예시 데이터 불러오기', h('p', null, '지금 있는 이력 ' + db.rows.length + '건과 표기 사전을 지우고 예시 데이터로 바꿉니다. 먼저 「Excel 내보내기」로 받아 두세요.'), [
+      openDialog('예시 데이터 불러오기', h('p', null, '지금 있는 이력 ' + db.rows.length + '건과 표기 사전' + (L.allPhotoIds(db.rows).length ? '·사진 ' + L.allPhotoIds(db.rows).length + '장' : '') + '을 지우고 예시 데이터로 바꿉니다. 먼저 「백업 내려받기」나 「Excel 내보내기」로 받아 두세요.'), [
         h('button', { type: 'button', class: 'btn', onclick: closeDialog }, '취소'),
         h('button', { type: 'button', class: 'btn btn-danger', onclick: go }, '지우고 불러오기')
       ]);
@@ -184,11 +260,106 @@
       Object.keys(db.dict[f] || {}).forEach(function (k) { dictAoa.push([L.FIELD[f].label, k, db.dict[f][k]]); });
     });
     var rows = db.rows.slice().sort(byDateDesc);
-    writeXlsx('품질불량이력' + tag() + '_' + today() + '.xlsx', {
-      '품질불량이력': L.standardSheet(rows),
+    writeXlsx('품질불량이력' + tag() + '_' + today() + '.xlsx', exportSheets(rows, dictAoa));
+  }
+  // 이력 표에 「사진 수」「사진 파일」 칸을 붙이고, 사진이 있으면 「사진 목록」 시트를 더합니다.
+  // Excel 안에 그림은 넣지 못해(쓰는 Excel 라이브러리 무료판 한계) 파일 이름으로 ZIP 안의 사진과 잇습니다.
+  function exportSheets(rows, dictAoa) {
+    var names = L.photoFileNames(rows);
+    var sheets = {
+      '품질불량이력': L.standardSheetWithPhotos(rows, names),
       '표기 정리 적용': L.standardSheet(L.canonRows(db.dict, rows)),
       '표기 사전': dictAoa
+    };
+    if (L.allPhotoIds(rows).length) sheets['사진 목록'] = L.photoListSheet(rows, names);
+    return sheets;
+  }
+  function dictSheet() {
+    var dictAoa = [['항목', '원래 표기(띄어쓰기·기호 뺀 키)', '대표 이름']];
+    L.DICT_FIELDS.forEach(function (f) {
+      Object.keys(db.dict[f] || {}).forEach(function (k) { dictAoa.push([L.FIELD[f].label, k, db.dict[f][k]]); });
     });
+    return dictAoa;
+  }
+  // Excel + 사진을 ZIP 하나로: 품질불량이력.xlsx 와 사진/관리번호_1.jpg …
+  function exportZip() {
+    var rows = db.rows.slice().sort(byDateDesc);
+    var names = L.photoFileNames(rows);
+    var ids = L.allPhotoIds(rows);
+    toast('사진 ' + ids.length + '장을 모으는 중입니다');
+    var wb = XLSX.utils.book_new(), sheets = exportSheets(rows, dictSheet());
+    Object.keys(sheets).forEach(function (n) {
+      var ws = XLSX.utils.aoa_to_sheet(sheets[n]);
+      ws['!cols'] = (sheets[n][0] || []).map(function () { return { wch: 16 }; });
+      XLSX.utils.book_append_sheet(wb, ws, n);
+    });
+    var xlsxName = '품질불량이력' + tag() + '_' + today() + '.xlsx';
+    var files = [{ name: xlsxName, data: new Uint8Array(XLSX.write(wb, { bookType: 'xlsx', type: 'array' })) }];
+    var missing = 0;
+    Promise.all(ids.map(function (id) {
+      return P.get(id).then(function (rec) {
+        if (!rec) { missing++; return null; }
+        return rec.blob.arrayBuffer ? rec.blob.arrayBuffer() : new Response(rec.blob).arrayBuffer();
+      }).then(function (buf) { return buf ? { name: '사진/' + names[id], data: new Uint8Array(buf) } : null; });
+    })).then(function (list) {
+      list.forEach(function (f) { if (f) files.push(f); });
+      download('품질불량이력_사진포함' + tag() + '_' + today() + '.zip', new Blob([L.makeZip(files)], { type: 'application/zip' }));
+      toast('Excel 과 사진 ' + (files.length - 1) + '장을 ZIP 으로 내려받았습니다' + (missing ? ' (찾지 못한 사진 ' + missing + '장)' : ''), !!missing);
+    }, function () { toast('사진을 모으지 못했습니다', true); });
+  }
+
+  // ── 백업 (이력·설정·사진을 JSON 하나로) ───────────────────
+  function exportBackup() {
+    var ids = L.allPhotoIds(db.rows), owner = {};
+    db.rows.forEach(function (r) { L.photosOf(r).forEach(function (p) { owner[p.id] = r.id; }); });
+    toast('백업을 만드는 중입니다');
+    Promise.all(ids.map(function (id) {
+      return P.get(id).then(function (rec) {
+        if (!rec) return null;
+        return Promise.all([P.blobToB64(rec.blob), P.blobToB64(rec.thumb)]).then(function (b) {
+          return { id: id, rowId: owner[id], name: rec.name || '', type: rec.blob.type || 'image/jpeg', w: rec.w, h: rec.h, bytes: rec.bytes, memo: rec.memo || '', data: b[0], thumb: b[1] };
+        });
+      });
+    })).then(function (photos) {
+      var out = L.buildBackup(db, photos.filter(Boolean));
+      download('품질불량이력_백업' + tag() + '_' + today() + '.json', new Blob([JSON.stringify(out)], { type: 'application/json' }));
+      toast('백업을 내려받았습니다(이력 ' + db.rows.length + '건 · 사진 ' + out.photos.length + '장)');
+    }, function () { toast('백업을 만들지 못했습니다', true); });
+  }
+  function restoreButton() {
+    var input = h('input', { type: 'file', accept: '.json,application/json', 'aria-label': '백업 파일 선택', onchange: function (e) {
+      var f = e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () { confirmRestore(L.parseBackup(String(rd.result))); };
+      rd.onerror = function () { toast('파일을 열지 못했습니다', true); };
+      rd.readAsText(f);
+    } });
+    return h('label', { class: 'btn file-btn' }, '백업 되살리기', input);
+  }
+  function confirmRestore(bk) {
+    if (bk.error) { toast(bk.error, true); return; }
+    var nowPhotos = L.allPhotoIds(db.rows).length;
+    openDialog('백업 되살리기', [
+      h('p', null, '백업(' + (bk.exportedAt ? bk.exportedAt.slice(0, 10) + ' 만듦, ' : '') + '이력 ' + bk.db.rows.length + '건 · 사진 ' + bk.photos.length + '장)으로 바꿉니다.'),
+      h('p', null, '지금 이 브라우저에 있는 이력 ' + db.rows.length + '건' + (nowPhotos ? '·사진 ' + nowPhotos + '장' : '') + '과 열 연결·표기 사전·탐지 기준은 지워지고 백업 내용으로 바뀝니다.'),
+      bk.warnings.length ? h('ul', { class: 'miss-list' }, bk.warnings.map(function (w) { return h('li', null, w); })) : null
+    ], [
+      h('button', { type: 'button', class: 'btn', onclick: closeDialog }, '취소'),
+      h('button', { type: 'button', class: 'btn btn-danger', onclick: function () {
+        var next = S.parseDb(bk.db);
+        var recs = bk.photos.map(function (x) {
+          return { id: x.id, rowId: x.rowId || '', name: x.name || '', w: x.w, h: x.h, bytes: x.bytes, memo: x.memo || '', at: Date.now(),
+            blob: P.b64ToBlob(x.data, x.type), thumb: x.thumb ? P.b64ToBlob(x.thumb, 'image/jpeg') : P.b64ToBlob(x.data, x.type) };
+        });
+        clearPhotos().then(function () { return P.putMany(recs); }).then(function () {
+          db = next; delete db._statusMoved;
+          save(); closeDialog();
+          toast('백업을 되살렸습니다(이력 ' + db.rows.length + '건 · 사진 ' + recs.length + '장)');
+          if (route() !== 'list') location.hash = '#/list'; else render();
+        }, function () { toast('사진을 저장하지 못했습니다. 저장 공간을 확인해 주세요', true); });
+      } }, '바꾸기')
+    ]);
   }
 
   // ── 품질 이력 ─────────────────────────────────────────────
@@ -254,7 +425,7 @@
         h('li', null, h('strong', null, '① 실제 이력에 맞추기 — 반영함'), ' — 실제 열 연결을 「저장된 양식」으로 넣었습니다(불러오기 화면). 불량유형·원인 분류가 자유 기재라 「표기 정리」에 비슷한 표기를 묶자고 제안하는 「묶기 제안」을 더했고, 반복·다발 기준을 「같은 품번 또는 같은 불량유형이 2건 이상」으로 바꿨습니다. 유사 검색은 「터미널」과 「단자」를 같은 말로 봅니다. 공정불량 이력 LIST 도 자료 구분을 골라 함께 불러올 수 있습니다.'),
         h('li', null, h('strong', null, '② 대책서에서 항목 뽑기 — 다음'), ' — 대책서가 주로 Excel 이라, 브라우저에서 대책서 Excel 을 열어 「불량현상」「발생원인」「개선대책」「재발방지대책」 같은 제목 칸 옆(또는 아래) 칸을 읽어 이력에 붙입니다. 하자NO.(없으면 품번+발생일)로 이력과 잇습니다. 메일로 보내 주실 대책서 3건의 양식을 보고 만듭니다.'),
         h('li', null, h('strong', null, '③ 문서 근거 질의(RAG)'), ' — 외부 AI 사용이 가능하다고 하셔서 NotebookLM 에 대책서·불량 LIST 를 올려 묻는 방식부터 안내합니다.'),
-        h('li', null, h('strong', null, '사진 — 보류'), ' — 지금은 불량 사진이 없어 사진으로 현상 쓰기·자동 분류는 사진이 모이면 시작합니다. 사진은 품번·발생일자·이슈번호로 관리하신다고 하니, 파일 이름에 하자NO. 를 넣어 두시면 이력과 바로 이을 수 있습니다.'),
+        h('li', null, h('strong', null, '사진 붙이기 — 2026-09-30 반영'), ' — 「건 추가」나 건을 연 창에서 사진을 여러 장 붙이고(휴대폰은 카메라로 바로), 목록에서 작은 그림으로 보고 눌러 크게 봅니다. 사진으로 현상 쓰기·자동 분류는 유형별 사진이 모이면 시작합니다.'),
         h('li', null, h('strong', null, 'KPI — 만들지 않음'), ' — 답에 따라 월간 KPI 보고서는 만들지 않습니다. 혼자 쓰신다고 하여 공유 저장소도 두지 않고 이 브라우저에 저장합니다.'))));
   }
   function renderList(main) {
@@ -272,7 +443,8 @@
         h('p', { class: 'note' }, '실제 파일이 아직 없으면 「예시 데이터 불러오기」로 가상 데이터를 넣어 흐름을 볼 수 있습니다. samples 폴더의 예시 파일로 열 맞추기도 시험해 볼 수 있습니다: ',
           h('a', { href: 'samples/예시데이터_품질불량이력.xlsx', download: true }, '품질불량 이력 Excel(예시)'), ' · ',
           h('a', { href: 'samples/예시데이터_품질불량이력.csv', download: true }, 'CSV(예시)')),
-        h('div', { class: 'btn-row' }, importButton(true), sampleButton(false), templateButton())));
+        h('div', { class: 'btn-row' }, importButton(true), sampleButton(false), templateButton(), restoreButton()),
+        h('p', { class: 'note' }, '「백업 되살리기」 — 이 도구의 「백업 내려받기」로 받은 JSON 파일(이력·설정·사진)을 다른 PC·브라우저에서 그대로 되살립니다.')));
       main.appendChild(nextPanel());
       return;
     }
@@ -353,6 +525,9 @@
     list.appendChild(h('div', { class: 'list-meta' }, h('div', { class: 'btn-row' },
       h('button', { type: 'button', class: 'btn', onclick: function () { editRow(null); } }, '건 추가'),
       h('button', { type: 'button', class: 'btn', onclick: exportAll }, 'Excel 내보내기'),
+      L.allPhotoIds(db.rows).length ? h('button', { type: 'button', class: 'btn', onclick: exportZip }, 'Excel + 사진 ZIP') : null,
+      h('button', { type: 'button', class: 'btn', onclick: exportBackup }, '백업 내려받기'),
+      restoreButton(),
       h('button', { type: 'button', class: 'btn', onclick: function () {
         download('품질불량이력' + tag() + '_' + today() + '.csv', new Blob([L.aoaToCsv(L.standardSheet(rows))], { type: 'text/csv;charset=utf-8' }));
       } }, anyFilter ? '거른 결과 CSV' : 'CSV 내보내기'),
@@ -361,6 +536,7 @@
     if (view.page >= pages) view.page = pages - 1;
     var shown = rows.slice(view.page * PAGE, view.page * PAGE + PAGE);
     var cols = ['mgmt_no', 'date', 'part_no', 'part_name', 'defect_type', 'symptom', 'cause_cat', 'cause', 'action', 'qty', 'process', 'customer'];
+    var nPhotos = L.allPhotoIds(db.rows).length;
     var rawById = {};
     db.rows.forEach(function (r) { rawById[r.id] = r; });
     var body = h('tbody');
@@ -369,6 +545,7 @@
       var lvl = (byId[r.id] || []).some(function (i) { return i.level === 'error'; }) ? 'error' : byId[r.id] ? 'warn' : '';
       body.appendChild(h('tr', { class: 'clickable' + (lvl ? ' row-' + lvl : ''), tabindex: '0',
         onclick: function () { editRow(raw); }, onkeydown: function (e) { if (e.key === 'Enter') editRow(raw); } },
+        photoThumbCell(raw),
         cols.map(function (k) {
           var v = r[k];
           if (v == null && raw._raw && raw._raw[k] != null) v = raw._raw[k];
@@ -379,7 +556,9 @@
         })));
     });
     list.appendChild(h('div', { class: 'table-wrap' }, h('table', { class: 'list' },
-      h('thead', null, h('tr', null, cols.map(function (k) { return h('th', null, L.FIELD[k].label); }))), body)));
+      h('thead', null, h('tr', null, h('th', { class: 'photo-col' }, '사진'), cols.map(function (k) { return h('th', null, L.FIELD[k].label); }))), body)));
+    list.appendChild(h('p', { class: 'note' }, '사진은 「건 추가」나 건을 눌러 연 창에서 붙입니다(휴대폰은 카메라로 바로 찍을 수 있습니다). 작은 그림을 누르면 크게 봅니다. ' +
+      (nPhotos ? '지금 사진 ' + nPhotos + '장이 이 브라우저에 있습니다. ' : '') + '사진은 이 브라우저 안(IndexedDB)에만 저장되니 「백업 내려받기」로 받아 두세요.'));
     list.appendChild(h('p', { class: 'note' }, '불량유형·원인은 「표기 정리」를 적용한 대표 이름으로 보입니다. 원래 표기는 칸에 마우스를 올리거나 건을 열면 보입니다.'));
     if (pages > 1) {
       list.appendChild(h('div', { class: 'pager' },
@@ -390,12 +569,12 @@
     main.appendChild(list);
   }
   function clearAll() {
-    openDialog('전체 삭제', h('p', null, '이 브라우저에 저장된 품질 이력 ' + db.rows.length + '건과 대책서 초안 작업을 지웁니다. 열 연결·표기 사전·탐지 기준은 남깁니다. 되돌릴 수 없습니다.'), [
+    openDialog('전체 삭제', h('p', null, '이 브라우저에 저장된 품질 이력 ' + db.rows.length + '건' + (L.allPhotoIds(db.rows).length ? '·사진 ' + L.allPhotoIds(db.rows).length + '장' : '') + '과 대책서 초안 작업을 지웁니다. 열 연결·표기 사전·탐지 기준은 남깁니다. 되돌릴 수 없습니다.'), [
       h('button', { type: 'button', class: 'btn', onclick: closeDialog }, '취소'),
       h('button', { type: 'button', class: 'btn btn-danger', onclick: function () {
         var keep = { mapping: db.mapping, dict: db._sample ? L.emptyDb().dict : db.dict, rule: db.rule, search: db.search };
         db = L.emptyDb(); Object.assign(db, keep);
-        save(); closeDialog(); toast('모두 지웠습니다'); render();
+        save(); closeDialog(); clearPhotos(); toast('모두 지웠습니다'); render();
       } }, '모두 지우기')
     ]);
   }
@@ -422,6 +601,85 @@
       if (long.indexOf(f.key) >= 0) fl.classList.add('span-all');
       form.appendChild(fl);
     });
+    // 사진: 창 안에서는 목록(work)만 바꾸고, 「저장」을 눌러야 이력에 붙습니다.
+    // 새로 넣거나 돌린 사진은 새 id 로 바로 IndexedDB 에 쓰고(added), 저장하지 않고 닫으면 지웁니다.
+    var orig = L.photosOf(r).map(function (p) { return Object.assign({}, p); });
+    var work = orig.map(function (p) { return Object.assign({}, p); });
+    var added = [], saved = false;
+    var photoBox = h('div', { class: 'photo-edit' });
+    var photoMsg = h('p', { class: 'note', role: 'status', 'aria-live': 'polite' });
+    function addPhotoFiles(fileList) {
+      var files = Array.prototype.slice.call(fileList || []).filter(function (f) { return /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(f.name); });
+      if (!files.length) return;
+      var room = L.PHOTO_LIMIT - work.length;
+      if (room <= 0) { toast('한 건에 사진은 ' + L.PHOTO_LIMIT + '장까지 붙일 수 있습니다', true); return; }
+      if (files.length > room) toast('한 건에 ' + L.PHOTO_LIMIT + '장까지라 ' + room + '장만 넣습니다', true);
+      files = files.slice(0, room);
+      photoMsg.textContent = '사진 ' + files.length + '장을 줄여서 저장하는 중입니다…';
+      var fails = [];
+      files.reduce(function (chain, f) {
+        return chain.then(function () {
+          return P.shrink(f).then(function (x) {
+            var id = P.newId();
+            pendingPhotos[id] = true; added.push(id);
+            return P.put({ id: id, rowId: r ? r.id : '', name: f.name || '', w: x.w, h: x.h, bytes: x.bytes, memo: '', at: Date.now(), blob: x.blob, thumb: x.thumb })
+              .then(function () { work.push({ id: id, name: f.name || '', w: x.w, h: x.h, bytes: x.bytes, memo: '' }); drawPhotos(); });
+          }).catch(function (e) { fails.push((f.name || '사진') + ': ' + (e && e.message ? e.message : '저장하지 못했습니다')); });
+        });
+      }, Promise.resolve()).then(function () {
+        photoMsg.textContent = fails.length ? '넣지 못한 사진 — ' + fails.join(' / ') : '';
+        if (!P.available() && !photoStoreWarned) { photoStoreWarned = true; toast('이 브라우저에서는 사진 저장소(IndexedDB)를 쓸 수 없어, 창을 닫으면 사진이 사라집니다', true); }
+        if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {}); // 브라우저가 사진을 임의로 지우지 않게 요청
+      });
+    }
+    function rotatePhoto(i) {
+      var p = work[i];
+      photoMsg.textContent = '사진을 돌리는 중입니다…';
+      P.get(p.id).then(function (rec) {
+        if (!rec) throw new Error('사진을 찾지 못했습니다');
+        return P.shrink(rec.blob, 90).then(function (x) {
+          var id = P.newId();
+          pendingPhotos[id] = true; added.push(id);
+          return P.put({ id: id, rowId: rec.rowId, name: p.name, w: x.w, h: x.h, bytes: x.bytes, memo: p.memo, at: Date.now(), blob: x.blob, thumb: x.thumb }).then(function () {
+            work[i] = Object.assign({}, p, { id: id, w: x.w, h: x.h, bytes: x.bytes });
+            photoMsg.textContent = ''; drawPhotos();
+          });
+        });
+      }).catch(function (e) { photoMsg.textContent = e.message || '돌리지 못했습니다'; });
+    }
+    function drawPhotos() {
+      photoBox.textContent = '';
+      var grid = h('ul', { class: 'photo-grid' });
+      work.forEach(function (p, i) {
+        var memo = h('input', { type: 'text', value: p.memo || '', placeholder: '설명(선택)', 'aria-label': '사진 ' + (i + 1) + ' 설명', maxlength: '100' });
+        memo.addEventListener('input', function () { p.memo = memo.value; });
+        grid.appendChild(h('li', { class: 'photo-item' },
+          h('button', { type: 'button', class: 'thumb-btn big', 'aria-label': '사진 ' + (i + 1) + ' 크게 보기', onclick: function () { openLightbox(work, i, isNew ? '새 건' : rowTitle(r)); } }, thumbImg(p.id, '사진 ' + (i + 1))),
+          memo,
+          h('div', { class: 'photo-tools' },
+            h('button', { type: 'button', class: 'btn btn-sm', disabled: i === 0, 'aria-label': '사진 ' + (i + 1) + ' 앞으로', onclick: function () { var t = work[i - 1]; work[i - 1] = work[i]; work[i] = t; drawPhotos(); } }, '앞으로'),
+            h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': '사진 ' + (i + 1) + ' 오른쪽으로 돌리기', onclick: function () { rotatePhoto(i); } }, '돌리기'),
+            h('button', { type: 'button', class: 'btn btn-sm btn-danger', 'aria-label': '사진 ' + (i + 1) + ' 빼기', onclick: function () { work.splice(i, 1); drawPhotos(); } }, '빼기'))));
+      });
+      var pick = h('input', { type: 'file', accept: 'image/*', multiple: true, 'aria-label': '사진 파일 고르기', onchange: function (e) { addPhotoFiles(e.target.files); e.target.value = ''; } });
+      var cam = h('input', { type: 'file', accept: 'image/*', capture: 'environment', 'aria-label': '카메라로 찍기', onchange: function (e) { addPhotoFiles(e.target.files); e.target.value = ''; } });
+      add(photoBox, [
+        work.length ? grid : h('p', { class: 'note' }, '붙인 사진이 없습니다.'),
+        h('div', { class: 'btn-row' },
+          h('label', { class: 'btn file-btn' }, '사진 고르기', pick),
+          h('label', { class: 'btn file-btn cam-btn' }, '카메라로 찍기', cam)),
+        photoMsg,
+        h('p', { class: 'note' }, '한 건에 ' + L.PHOTO_LIMIT + '장까지. 긴 변 ' + L.PHOTO_MAX + 'px 로 줄인 사본만 이 브라우저에 저장합니다(원본 파일은 그대로 있습니다). 빼기·돌리기·순서는 「저장」을 눌러야 반영됩니다.')
+      ]);
+    }
+    drawPhotos();
+    var photoField = h('div', { class: 'field span-all photo-field' }, h('span', null, '사진' + (work.length ? ' (' + work.length + '장)' : '')), photoBox);
+    form.appendChild(photoField);
+    onDialogClose = function () {
+      added.forEach(function (id) { delete pendingPhotos[id]; });
+      if (!saved) dropPhotos(added);   // 저장하지 않고 닫았으면 이번에 넣은 사진을 지웁니다
+    };
+
     var msgs = r ? L.validateRows([r]) : [];
     function collect() {
       var src = {};
@@ -435,7 +693,8 @@
     ], [
       isNew ? null : h('button', { type: 'button', class: 'btn btn-danger', onclick: function () {
         db.rows = db.rows.filter(function (x) { return x.id !== r.id; });
-        save(); closeDialog(); toast('지웠습니다'); render();
+        save(); closeDialog(); dropPhotos(orig.map(function (p) { return p.id; }));
+        toast('지웠습니다' + (orig.length ? '(사진 ' + orig.length + '장 포함)' : '')); render();
       } }, '삭제'),
       isNew ? null : h('button', { type: 'button', class: 'btn', onclick: function () {
         var c = collect();
@@ -446,12 +705,19 @@
       h('button', { type: 'button', class: 'btn btn-primary', onclick: function () {
         var nr = collect();
         if (!nr.date) { toast('발생일은 꼭 적어야 합니다', true); return; }
+        if (work.length) nr.photos = work.map(function (p) { return { id: p.id, name: p.name || '', w: p.w, h: p.h, bytes: p.bytes, memo: (p.memo || '').trim() }; });
         if (isNew) addRows([nr]);
         else {
           nr.id = r.id; if (r._src) nr._src = r._src;
           db.rows = db.rows.map(function (x) { return x.id === r.id ? nr : x; });
         }
-        save(); closeDialog(); toast(isNew ? '추가했습니다' : '고쳤습니다');
+        saved = true;
+        save(); closeDialog();
+        // 빠진 사진(빼기·돌리기 전 것)은 이제 지웁니다. 설명은 저장본 기록에도 적어 둡니다(백업·ZIP 이 씁니다).
+        var keep = {}; work.forEach(function (p) { keep[p.id] = true; });
+        dropPhotos(orig.filter(function (p) { return !keep[p.id]; }).map(function (p) { return p.id; }));
+        work.forEach(function (p) { P.get(p.id).then(function (rec) { if (rec && (rec.memo !== (p.memo || '').trim() || rec.rowId !== nr.id)) { rec.memo = (p.memo || '').trim(); rec.rowId = nr.id; P.put(rec); } }); });
+        toast((isNew ? '추가했습니다' : '고쳤습니다') + (work.length ? '(사진 ' + work.length + '장)' : ''));
         if (preset && route() !== 'list') location.hash = '#/list'; else render();
       } }, '저장')
     ]);
@@ -601,7 +867,7 @@
     });
     prev.appendChild(h('div', { class: 'table-wrap' }, h('table', { class: 'list' },
       h('thead', null, h('tr', null, cols.map(function (k) { return h('th', null, L.FIELD[k].label); }))), tb)));
-    var mode = select('mode', [['append', '지금 이력 뒤에 추가'], ['replace', '지금 이력을 지우고 바꾸기']], imp.mode);
+    var mode = select('mode', [['append', '지금 이력 뒤에 추가'], ['replace', '지금 이력' + (L.allPhotoIds(db.rows).length ? '·사진' : '') + '을 지우고 바꾸기']], imp.mode);
     mode.addEventListener('change', function () { imp.mode = mode.value; });
     prev.appendChild(h('div', { class: 'form-grid', style: 'margin-top:16px' },
       field('불러오는 방식', mode, db.rows.length ? '지금 ' + db.rows.length + '건' + (db._sample ? '(예시 데이터 — 불러오면 지워집니다)' : '') + '이 있습니다' : null)));
@@ -615,6 +881,7 @@
         db.headers = importHeaders(); // 열 이름만 기억합니다(「다음 단계」 요약 글용). 값은 넣지 않습니다.
         if (wasSample) db.dict = L.emptyDb().dict;
         addRows(c.rows, imp.mode === 'replace' || wasSample);
+        if (imp.mode === 'replace' || wasSample) clearPhotos();
         save();
         var s2 = L.issueSummary(L.validateRows(db.rows));
         imp = null;
@@ -1086,6 +1353,7 @@
   }
 
   render();
+  gcPhotos(); // 지난번에 저장하지 않고 닫은 사진·지운 건의 사진 정리
   if (startNotice) { save(); toast(startNotice); }
   else if (db.rows.length) save(); // 옛 반복 기준(30일 3건) 등 불러올 때 바꾼 값을 저장
 })();

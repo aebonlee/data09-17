@@ -763,6 +763,159 @@
     list.forEach(function (e) { a.push([e.label, e.first, e.last, e.span, e.count, e.qty, e.rows.map(function (r) { return r.mgmt_no || r.date; }).join(', ')]); });
     return a;
   }
+  // ── 사진 (2026-09-30 추가) ────────────────────────────────────
+  // 사진 본체는 IndexedDB(js/photos.js)에 두고, 이력 행에는 가벼운 목록만 둡니다.
+  //   row.photos = [{ id, name, w, h, bytes, memo }]
+  // localStorage 는 수 MB 에서 가득 차므로 사진 본체를 넣지 않습니다.
+  var PHOTO_MAX = 1280;   // 저장본 긴 변(px)
+  var THUMB_MAX = 240;    // 목록 작은 그림 긴 변(px)
+  var PHOTO_LIMIT = 20;   // 한 건에 붙이는 사진 수 한도
+  // 긴 변을 max 이하로 줄인 크기. 작은 사진은 키우지 않습니다.
+  function fitSize(w, h, max) {
+    w = Math.max(1, Math.round(+w || 0)); h = Math.max(1, Math.round(+h || 0));
+    var s = Math.min(1, max / Math.max(w, h));
+    return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
+  }
+  function photosOf(r) { return r && Array.isArray(r.photos) ? r.photos : []; }
+  function photoCount(r) { return photosOf(r).length; }
+  function allPhotoIds(rows) {
+    var out = [];
+    (rows || []).forEach(function (r) { photosOf(r).forEach(function (p) { if (p && p.id) out.push(p.id); }); });
+    return out;
+  }
+  // 이력에서 더 이상 가리키지 않는 사진 id (지운 건·되돌린 편집의 남은 사진)
+  function orphanPhotoIds(rows, storedIds, keep) {
+    var used = {};
+    allPhotoIds(rows).forEach(function (id) { used[id] = true; });
+    (keep || []).forEach(function (id) { used[id] = true; });
+    return (storedIds || []).filter(function (id) { return !used[id]; });
+  }
+  function safeName(s) {
+    return String(s == null ? '' : s).replace(/[\\\/:*?"<>|\u0000-\u001f]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 60);
+  }
+  // 내보낼 때 쓰는 사진 파일 이름: 「관리번호(없으면 발생일_품번)_순번.jpg」, 겹치면 뒤에 -2, -3.
+  // Excel 의 「사진 파일」 칸과 ZIP 안의 파일 이름이 같아 서로 찾을 수 있습니다.
+  function photoFileNames(rows) {
+    var map = {}, seen = {};
+    (rows || []).forEach(function (r) {
+      var base = safeName(r.mgmt_no) || safeName([r.date, r.part_no].filter(Boolean).join('_')) || safeName(r.id) || '사진';
+      photosOf(r).forEach(function (p, i) {
+        var n = base + '_' + (i + 1), name = n + '.jpg', k = 2;
+        while (seen[name.toLowerCase()]) name = n + '-' + (k++) + '.jpg';
+        seen[name.toLowerCase()] = true;
+        map[p.id] = name;
+      });
+    });
+    return map;
+  }
+  // 이력 표 + 사진 칸(사진 수·파일 이름). 사진 자체는 Excel 에 넣지 않고 ZIP 에 같은 이름으로 담습니다.
+  function photoListSheet(rows, names) {
+    names = names || photoFileNames(rows);
+    var a = [['관리번호', '발생일', '품번', '불량유형', '사진 순번', '사진 파일', '원래 파일 이름', '설명', '가로(px)', '세로(px)', '크기(KB)']];
+    (rows || []).forEach(function (r) {
+      photosOf(r).forEach(function (p, i) {
+        a.push([r.mgmt_no || '', r.date || '', r.part_no || '', r.defect_type || '', i + 1, names[p.id] || '', p.name || '', p.memo || '',
+          p.w || '', p.h || '', p.bytes ? Math.round(p.bytes / 102.4) / 10 : '']);
+      });
+    });
+    return a;
+  }
+  function standardSheetWithPhotos(rows, names) {
+    names = names || photoFileNames(rows);
+    var aoa = standardSheet(rows);
+    aoa[0] = aoa[0].concat(['사진 수', '사진 파일']);
+    rows.forEach(function (r, i) {
+      var ps = photosOf(r);
+      aoa[i + 1] = aoa[i + 1].concat([ps.length, ps.map(function (p) { return names[p.id] || ''; }).join(', ')]);
+    });
+    return aoa;
+  }
+
+  // ── ZIP (압축 없이 담기) ──────────────────────────────────────
+  // 사진은 이미 JPEG 라 압축해도 거의 줄지 않아 「저장(stored)」 방식으로 담습니다. 한글 파일 이름은 UTF-8 표시(bit 11).
+  var CRC_TABLE = null;
+  function crc32(u8) {
+    if (!CRC_TABLE) {
+      CRC_TABLE = [];
+      for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; CRC_TABLE[n] = c >>> 0; }
+    }
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < u8.length; i++) crc = CRC_TABLE[(crc ^ u8[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function utf8(s) {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(s);
+    var b = unescape(encodeURIComponent(s)), u = new Uint8Array(b.length);
+    for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+    return u;
+  }
+  function makeZip(files, when) {
+    var d = when || new Date();
+    var dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2);
+    var dosDate = ((Math.max(1980, d.getFullYear()) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    var parts = [], central = [], offset = 0;
+    function hdr(size) { var b = new Uint8Array(size); return { b: b, v: new DataView(b.buffer) }; }
+    files.forEach(function (f) {
+      var name = utf8(f.name), data = f.data, crc = crc32(data);
+      var L = hdr(30);
+      L.v.setUint32(0, 0x04034b50, true); L.v.setUint16(4, 20, true); L.v.setUint16(6, 0x0800, true); L.v.setUint16(8, 0, true);
+      L.v.setUint16(10, dosTime, true); L.v.setUint16(12, dosDate, true); L.v.setUint32(14, crc, true);
+      L.v.setUint32(18, data.length, true); L.v.setUint32(22, data.length, true); L.v.setUint16(26, name.length, true); L.v.setUint16(28, 0, true);
+      parts.push(L.b, name, data);
+      var C = hdr(46);
+      C.v.setUint32(0, 0x02014b50, true); C.v.setUint16(4, 20, true); C.v.setUint16(6, 20, true); C.v.setUint16(8, 0x0800, true); C.v.setUint16(10, 0, true);
+      C.v.setUint16(12, dosTime, true); C.v.setUint16(14, dosDate, true); C.v.setUint32(16, crc, true);
+      C.v.setUint32(20, data.length, true); C.v.setUint32(24, data.length, true); C.v.setUint16(28, name.length, true);
+      C.v.setUint32(42, offset, true);
+      central.push(C.b, name);
+      offset += 30 + name.length + data.length;
+    });
+    var cdSize = central.reduce(function (s, b) { return s + b.length; }, 0);
+    var E = hdr(22);
+    E.v.setUint32(0, 0x06054b50, true); E.v.setUint16(8, files.length, true); E.v.setUint16(10, files.length, true);
+    E.v.setUint32(12, cdSize, true); E.v.setUint32(16, offset, true);
+    var all = parts.concat(central, [E.b]);
+    var out = new Uint8Array(all.reduce(function (s, b) { return s + b.length; }, 0)), p = 0;
+    all.forEach(function (b) { out.set(b, p); p += b.length; });
+    return out;
+  }
+
+  // ── JSON 백업 (이력 + 설정 + 사진) ────────────────────────────
+  // photos: [{ id, rowId, name, type, w, h, bytes, memo, data(base64), thumb(base64) }]
+  var BACKUP_APP = 'data09-17';
+  function buildBackup(db, photos, when) {
+    return { app: BACKUP_APP, kind: '품질불량 이력 백업', version: 1, exportedAt: (when || new Date()).toISOString(), db: db, photos: photos || [] };
+  }
+  var B64 = /^[A-Za-z0-9+/]*={0,2}$/;
+  function parseBackup(textOrObj) {
+    var p = textOrObj, warnings = [];
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { return { error: 'JSON 으로 읽지 못했습니다. 이 도구의 「백업 내려받기」로 만든 파일인지 확인해 주세요.' }; } }
+    if (!p || typeof p !== 'object' || p.app !== BACKUP_APP || !p.db || !Array.isArray(p.db.rows)) return { error: '이 도구의 백업 파일이 아닙니다.' };
+    var photos = [], byId = {};
+    (Array.isArray(p.photos) ? p.photos : []).forEach(function (x) {
+      if (!x || typeof x.id !== 'string' || !x.id || typeof x.data !== 'string' || !x.data || !B64.test(x.data)) { warnings.push('읽지 못한 사진 1장을 건너뛰었습니다'); return; }
+      if (byId[x.id]) return;
+      byId[x.id] = true;
+      photos.push(x);
+    });
+    var db = p.db, missing = 0;
+    db.rows = db.rows.filter(function (r) { return r && typeof r === 'object'; });
+    db.rows.forEach(function (r) {
+      if (!Array.isArray(r.photos)) { delete r.photos; return; }
+      var before = r.photos.length;
+      r.photos = r.photos.filter(function (m) { return m && byId[m.id]; });
+      missing += before - r.photos.length;
+      if (!r.photos.length) delete r.photos;
+    });
+    if (missing) warnings.push('사진 본체가 없는 사진 ' + missing + '장은 목록에서 뺐습니다');
+    var used = {};
+    allPhotoIds(db.rows).forEach(function (id) { used[id] = true; });
+    var extra = photos.filter(function (x) { return !used[x.id]; }).length;
+    if (extra) warnings.push('어느 건에도 붙지 않은 사진 ' + extra + '장은 넣지 않았습니다');
+    photos = photos.filter(function (x) { return used[x.id]; });
+    return { db: db, photos: photos, warnings: warnings, exportedAt: p.exportedAt || '' };
+  }
+
   function csvCell(v) {
     var s = v == null ? '' : String(v);
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -856,7 +1009,10 @@
     MAPPING_PRESETS: MAPPING_PRESETS, findHeader: findHeader, pickPreset: pickPreset, applyPreset: applyPreset,
     fixMapping: fixMapping, moveStatusValues: moveStatusValues,
     GROUP_SYNONYMS: GROUP_SYNONYMS, GROUP_NEAR: GROUP_NEAR, coreOf: coreOf, suggestGroups: suggestGroups,
-    applyGroup: applyGroup, removeGroup: removeGroup, sameWords: sameWords
+    applyGroup: applyGroup, removeGroup: removeGroup, sameWords: sameWords,
+    PHOTO_MAX: PHOTO_MAX, THUMB_MAX: THUMB_MAX, PHOTO_LIMIT: PHOTO_LIMIT, fitSize: fitSize, photosOf: photosOf, photoCount: photoCount,
+    allPhotoIds: allPhotoIds, orphanPhotoIds: orphanPhotoIds, photoFileNames: photoFileNames, photoListSheet: photoListSheet,
+    standardSheetWithPhotos: standardSheetWithPhotos, crc32: crc32, makeZip: makeZip, buildBackup: buildBackup, parseBackup: parseBackup
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.QCLogic = api;

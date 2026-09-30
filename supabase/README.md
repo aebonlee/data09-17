@@ -24,13 +24,22 @@
 | `app_settings` | 반복·다발 탐지 기준(묶음 기준, N일 — 0 은 기간 제한 없음, M건. 기본값은 2026-09-30 확정 기준 「같은 품번 또는 같은 불량유형 · 제한 없음 · 2건」)과 유사 불량 검색 가중치 | `rule`, `search` |
 | `countermeasure_draft` | 대책서 초안(새 불량 정보, 붙인 과거 이력, AI 답변, 칸 나눈 결과) | `draft` |
 | `defect_change_log` | 불량 이력 변경 기록(입력·수정·삭제 전후 값) — 트리거가 자동으로 남김 | 없음(새로 추가) |
+| `defect_photo` | 불량 이력 한 건에 붙인 사진 정보(순서, 원래 이름, 설명, 크기, Storage 경로). 이력을 지우면 함께 지워집니다 — 2026-09-30 추가 | `rows[].photos`(사진 본체는 IndexedDB `data09-17.photos`) |
+
+사진 파일 자체는 **비공개 Storage 버킷 `defect-photos`** 에 둡니다(2026-09-30 추가).
+
+- 경로는 `<본인 id>/<row_key>/<photo_key>.jpg`, 작은 그림은 `…_thumb.jpg` 입니다.
+- 버킷은 `public = false` 라 공개 주소로 열리지 않습니다. 로그인한 본인이 자기 폴더의 파일만 올리고·보고·바꾸고·지울 수 있고, 화면에 보일 때는 앱이 `createSignedUrl`(짧은 유효시간)로 주소를 받아 씁니다.
+- 파일 한 개 5MB, JPEG·PNG·WebP 만 받습니다. 도구가 올리는 것은 긴 변 1280px 로 줄인 JPEG 라 보통 수백 KB 입니다.
+- `defect_photo.storage_path` 의 첫 폴더가 본인 id 가 아니면 DB 가 받지 않습니다.
+- 이력을 지우면 `defect_photo` 는 외래 키로 함께 지워지지만 **Storage 파일은 지워지지 않습니다.** 앱이 이력을 지울 때 Storage 파일도 함께 지웁니다.
 
 지켜지는 규칙은 다음과 같습니다.
 
 - 도구의 입력값 검사에서 「오류」인 행(발생일 없음·못 읽음, 수량 음수·못 읽음)은 DB 가 받지 않습니다. 도구 화면에서 고친 뒤 저장합니다. 「주의」(품번·불량유형 빈칸)는 받습니다.
 - 표기 사전은 불량유형·원인 분류·발생원인 세 항목에만 씁니다.
-- 묶음 기준은 도구의 네 가지(같은 품번·같은 유형 / 같은 유형 / 같은 품번 / 같은 품번·같은 원인)만, 기간은 1일 이상, 건수는 2건 이상만 받습니다.
-- 앱에서 upsert 할 때 지정할 `onConflict` 값: `defect` 는 `owner_id,row_key`, `class_dict` 는 `owner_id,field,variant`.
+- 묶음 기준은 도구의 다섯 가지(같은 품번 또는 같은 유형 / 같은 품번·같은 유형 / 같은 유형 / 같은 품번 / 같은 품번·같은 원인)만, 기간은 0(제한 없음) 이상, 건수는 2건 이상만 받습니다.
+- 앱에서 upsert 할 때 지정할 `onConflict` 값: `defect` 는 `owner_id,row_key`, `class_dict` 는 `owner_id,field,variant`, `defect_photo` 는 `owner_id,photo_key`.
 
 ## 보안
 
@@ -53,9 +62,9 @@
 
 ## 확인 방법
 
-- Table Editor 에 위 표의 테이블 6개가 보이면 됩니다.
-- Authentication → Policies 에서 6개 테이블 모두 RLS 가 켜져 있고 정책이 붙어 있는지 확인합니다.
-- SQL Editor 에서 다음을 실행하면 정책 22개가 나와야 합니다.
+- Table Editor 에 위 표의 테이블 7개가 보이면 됩니다. Storage 에 비공개 버킷 `defect-photos` 가 보이면 됩니다.
+- Authentication → Policies 에서 7개 테이블 모두 RLS 가 켜져 있고 정책이 붙어 있는지 확인합니다.
+- SQL Editor 에서 다음을 실행하면 정책 26개가 나와야 합니다(사진 버킷 정책 4개는 `schemaname = 'storage'` 쪽에 따로 있습니다).
 
   ```sql
   select tablename, policyname, cmd from pg_policies where schemaname = 'public' order by 1, 2;
@@ -77,6 +86,6 @@
 
 - PostgreSQL 16·17 이 필요합니다(macOS: `brew install postgresql@17`).
 - 임시 데이터베이스를 만들어 쓰고 끝나면 지우므로 기존 설치에 영향이 없습니다.
-- 스키마를 두 번 적용해 재실행 안전성을 보고, 사용자 A·B·비로그인 세 역할로 RLS 격리·기록성 표·변경 기록 트리거·제약·함수 권한을 확인합니다.
+- 스키마를 두 번 적용해 재실행 안전성을 보고, 사용자 A·B·비로그인 세 역할로 RLS 격리·기록성 표·변경 기록 트리거·제약·함수 권한·사진 표와 사진 버킷(비공개, 본인 폴더만)을 확인합니다. Storage 는 스텁(버킷·파일 표와 `foldername()`)으로 재현합니다.
 - 마지막에 「SQL 검증 통과.」가 나오면 성공입니다.
 - `scripts/sqltest/*.local.sql` 은 로컬 검증 전용입니다. Supabase SQL Editor 에서 실행하면 스스로 멈추도록 가드가 들어 있습니다.

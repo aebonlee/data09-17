@@ -2,6 +2,10 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 const L = require('../js/logic.js');
 const Sample = require('../js/sample-data.js');
 
@@ -370,6 +374,89 @@ test('요약 글: 열 이름을 기억 못 했으면 그렇게 적고, 유형 �
   assert.match(t, /기억하지 못했습니다/);
   assert.match(t, /OPT POWER 연결 누락 1/);
   assert.match(t, /\(101일, 약 3개월\)/);
+});
+
+console.log('사진 (2026-09-30)');
+test('사진 크기: 긴 변을 1280 으로 줄이고 작은 사진은 키우지 않음', () => {
+  assert.deepEqual(L.fitSize(4032, 3024, 1280), { w: 1280, h: 960 });
+  assert.deepEqual(L.fitSize(3024, 4032, 1280), { w: 960, h: 1280 });   // 세로 사진
+  assert.deepEqual(L.fitSize(800, 600, 1280), { w: 800, h: 600 });
+  assert.deepEqual(L.fitSize(4000, 10, 240), { w: 240, h: 1 });          // 0px 이 되지 않음
+});
+test('정리: 이력에서 가리키지 않는 사진만 지울 대상(저장 전 사진은 남김)', () => {
+  const rs = [row({ photos: [{ id: 'a' }, { id: 'b' }] }), row({})];
+  assert.deepEqual(L.allPhotoIds(rs), ['a', 'b']);
+  assert.deepEqual(L.orphanPhotoIds(rs, ['a', 'b', 'c', 'd'], ['d']), ['c']);
+  assert.equal(L.photoCount(rs[1]), 0);
+});
+test('내보내기 사진 이름: 관리번호_순번, 관리번호 없으면 발생일_품번, 겹치면 -2', () => {
+  const rs = [
+    row({ mgmt_no: 'Q-1', photos: [{ id: 'a' }, { id: 'b' }] }),
+    row({ mgmt_no: 'Q-1', photos: [{ id: 'c' }] }),
+    row({ date: '2026-09-01', part_no: 'P/100', photos: [{ id: 'd' }] })
+  ];
+  const n = L.photoFileNames(rs);
+  assert.equal(n.a, 'Q-1_1.jpg'); assert.equal(n.b, 'Q-1_2.jpg');
+  assert.equal(n.c, 'Q-1_1-2.jpg');                 // 같은 관리번호의 다른 건
+  assert.equal(n.d, '2026-09-01_P-100_1.jpg');      // 파일 이름에 못 쓰는 / 는 -
+});
+test('Excel: 이력 표 끝에 사진 수·사진 파일, 사진 목록 시트는 사진마다 한 줄', () => {
+  const rs = [row({ mgmt_no: 'Q-7', date: '2026-09-02', photos: [{ id: 'a', name: 'IMG_1.jpg', w: 1280, h: 960, bytes: 204800, memo: '찍힘 부위' }, { id: 'b' }] }), row({ mgmt_no: 'Q-8' })];
+  const t = L.standardSheetWithPhotos(rs);
+  assert.deepEqual(t[0].slice(-2), ['사진 수', '사진 파일']);
+  assert.deepEqual(t[1].slice(-2), [2, 'Q-7_1.jpg, Q-7_2.jpg']);
+  assert.deepEqual(t[2].slice(-2), [0, '']);
+  assert.equal(t[0].length, L.STD_FIELDS.length + 2);
+  const pl = L.photoListSheet(rs);
+  assert.equal(pl.length, 3);
+  assert.deepEqual(pl[1].slice(0, 8), ['Q-7', '2026-09-02', '', '', 1, 'Q-7_1.jpg', 'IMG_1.jpg', '찍힘 부위']);
+  assert.equal(pl[1][10], 200);   // KB
+  assert.equal(L.matchField('사진 수'), null);   // 내보낸 파일을 다시 불러와도 표준 항목에 섞이지 않음
+});
+test('ZIP: 한글 파일 이름·CRC 가 맞고 풀 수 있는 구조', () => {
+  assert.equal(L.crc32(new TextEncoder().encode('123456789')), 0xCBF43926);   // CRC-32 표준 검사값
+  const a = new TextEncoder().encode('hello'), b = new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+  const z = L.makeZip([{ name: '품질불량이력.xlsx', data: a }, { name: '사진/Q-1_1.jpg', data: b }], new Date(2026, 8, 30, 10, 0, 0));
+  const v = new DataView(z.buffer);
+  assert.equal(v.getUint32(0, true), 0x04034b50);
+  assert.equal(v.getUint16(6, true) & 0x0800, 0x0800);           // UTF-8 이름 표시
+  const eocd = z.length - 22;
+  assert.equal(v.getUint32(eocd, true), 0x06054b50);
+  assert.equal(v.getUint16(eocd + 10, true), 2);                 // 파일 2개
+  const cd = v.getUint32(eocd + 16, true);
+  assert.equal(v.getUint32(cd, true), 0x02014b50);
+  const nlen = v.getUint16(cd + 28, true);
+  assert.equal(new TextDecoder().decode(z.slice(cd + 46, cd + 46 + nlen)), '품질불량이력.xlsx');
+  assert.equal(v.getUint32(cd + 16, true), L.crc32(a));
+  // 실제 unzip 으로도 확인(있을 때만)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qczip-'));
+  try {
+    fs.writeFileSync(path.join(dir, 't.zip'), z);
+    let out = null;
+    try { out = execFileSync('unzip', ['-t', path.join(dir, 't.zip')], { encoding: 'utf8' }); } catch (e) { if (e.code !== 'ENOENT') throw new Error('unzip -t 실패: ' + (e.stdout || e.message)); }
+    if (out != null) assert.match(out, /No errors detected/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test('백업: 되살리면 이력·사진이 그대로, 본체 없는 사진은 목록에서 빼고 알림', () => {
+  const db = L.emptyDb();
+  db.rows = [row({ id: 'r1', mgmt_no: 'Q-1', photos: [{ id: 'p1', name: 'a.jpg' }, { id: 'p2' }] }), row({ id: 'r2', photos: [{ id: 'p3' }] })];
+  const photos = [{ id: 'p1', rowId: 'r1', data: 'AAEC', thumb: 'AA==' }, { id: 'p3', rowId: 'r2', data: '/9j/' }, { id: 'p9', data: 'AA==' }];
+  const text = JSON.stringify(L.buildBackup(db, photos, new Date('2026-09-30T00:00:00Z')));
+  const bk = L.parseBackup(text);
+  assert.equal(bk.error, undefined);
+  assert.equal(bk.exportedAt, '2026-09-30T00:00:00.000Z');
+  assert.deepEqual(bk.db.rows[0].photos.map(p => p.id), ['p1']);   // p2 는 본체가 없어 뺌
+  assert.deepEqual(bk.photos.map(p => p.id), ['p1', 'p3']);        // p9 는 어느 건에도 안 붙어 뺌
+  assert.equal(bk.warnings.length, 2);
+  assert.match(bk.warnings.join(' '), /본체가 없는 사진 1장/);
+});
+test('백업: 다른 파일·깨진 JSON·깨진 사진 자료는 거름', () => {
+  assert.match(L.parseBackup('{').error, /JSON/);
+  assert.match(L.parseBackup(JSON.stringify({ app: 'other', db: { rows: [] } })).error, /백업 파일이 아닙니다/);
+  const db = L.emptyDb(); db.rows = [row({ photos: [{ id: 'x' }] })];
+  const bk = L.parseBackup(L.buildBackup(db, [{ id: 'x', data: '<script>' }]));
+  assert.equal(bk.photos.length, 0);
+  assert.equal(bk.db.rows[0].photos, undefined);
 });
 
 console.log('\n' + passed + '개 통과' + (process.exitCode ? ' — 실패 있음' : ''));

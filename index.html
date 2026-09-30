@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>품질불량 이력 분석 도구</title>
-  <meta name="description" content="품질불량 이력 Excel을 열 맞추기로 가져와 품번·불량유형·원인별로 관리하고, 유사 불량 검색·반복 불량 탐지·월간 현황·대책서 초안 프롬프트를 만드는 브라우저 도구(1단계 시연판)">
+  <meta name="description" content="품질불량 이력 Excel을 열 맞추기로 가져와 품번·불량유형·원인별로 관리하고, 유사 불량 검색·반복 불량 탐지·월간 현황·대책서 초안 프롬프트를 만들고 건마다 불량 사진을 붙이는 브라우저 도구">
   <meta name="robots" content="noindex">
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -47,11 +47,22 @@
     </form>
   </dialog>
 
+  <dialog id="lightbox" class="lightbox" aria-labelledby="lbTitle">
+    <div class="lb-head"><h2 id="lbTitle">불량 사진</h2><button type="button" class="btn" id="lbClose">닫기</button></div>
+    <img id="lbImg" class="lb-img" alt="">
+    <div class="lb-foot">
+      <button type="button" class="btn" id="lbPrev">이전</button>
+      <span id="lbCap" class="lb-cap"></span>
+      <button type="button" class="btn" id="lbNext">다음</button>
+    </div>
+  </dialog>
+
   <!-- 로컬 파일(file://)로 열어도 돌도록 module 이 아닌 일반 스크립트로 불러옵니다 -->
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="js/logic.js"></script>
   <script src="js/sample-data.js"></script>
   <script src="js/store.js"></script>
+  <script src="js/photos.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

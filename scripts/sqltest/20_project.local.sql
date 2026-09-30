@@ -50,12 +50,18 @@ do $t$ begin
   perform public._assert_eq(
     (select count(*)::int from pg_policy p join pg_class c on c.oid = p.polrelid
       join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'),
-    22, '두 번 적용해도 정책이 22개 그대로다');
+    26, '두 번 적용해도 정책이 26개 그대로다(사진 표 4개 포함)');
   perform public._assert_eq(
     (select count(*)::int from pg_trigger t join pg_class c on c.oid = t.tgrelid
       join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'public' and not t.tgisinternal),
-    6, '두 번 적용해도 트리거가 6개 그대로다(updated_at 5 + 변경 기록 1)');
+    7, '두 번 적용해도 트리거가 7개 그대로다(updated_at 6 + 변경 기록 1)');
+  perform public._assert_eq(
+    (select count(*)::int from pg_policy p join pg_class c on c.oid = p.polrelid
+      join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'storage' and p.polname like 'defect\_photos\_%'),
+    4, '두 번 적용해도 사진 버킷 정책이 4개 그대로다');
+  perform public._assert_eq((select public::text || '/' || file_size_limit from storage.buckets where id = 'defect-photos'),
+    'false/5242880', '사진 버킷은 비공개(public = false)이고 파일 한도 5MB');
 end $t$;
 
 -- ── 사용자 A ───────────────────────────────────────────────────
@@ -98,6 +104,31 @@ begin
   perform public._assert((select strpos(answer, E'\n') > 0 from public.countermeasure_draft where id = v_draft),
     'AI 답변의 줄바꿈이 그대로 저장된다');
 
+  -- 사진 (2026-09-30)
+  insert into public.defect_photo (row_key, photo_key, sort_order, name, memo, width, height, bytes, storage_path, thumb_path)
+    values ('r1', 'ph1', 0, 'IMG_0001.jpg', '찍힘 부위', 1280, 960, 204800,
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r1/ph1.jpg', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r1/ph1_thumb.jpg');
+  insert into public.defect_photo (row_key, photo_key, storage_path)
+    values ('r3', 'ph3', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r3/ph3.jpg');
+  insert into storage.objects (bucket_id, name) values ('defect-photos', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r1/ph1.jpg');
+  perform public._assert_eq((select owner_id from public.defect_photo where photo_key = 'ph1'),
+    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid, '사진 정보의 owner_id 도 auth.uid() 로 채워진다');
+  perform public._assert_raises(
+    $q$insert into public.defect_photo (row_key, photo_key, storage_path) values ('r9', 'ph9', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r9/ph9.jpg')$q$,
+    '23503', '없는 이력(row_key)에는 사진을 붙일 수 없다');
+  perform public._assert_raises(
+    $q$insert into public.defect_photo (row_key, photo_key, storage_path) values ('r1', 'ph1', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r1/x.jpg')$q$,
+    '23505', '같은 사진 id(photo_key)는 두 번 들어가지 않는다');
+  perform public._assert_raises(
+    $q$insert into public.defect_photo (row_key, photo_key, storage_path) values ('r1', 'ph8', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/r1/ph8.jpg')$q$,
+    '23514', '사진 경로의 첫 폴더는 본인 id 여야 한다');
+  perform public._assert_raises(
+    $q$insert into public.defect_photo (row_key, photo_key, storage_path, width) values ('r1', 'ph8', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r1/ph8.jpg', 4032)$q$,
+    '23514', '저장본은 긴 변 1280px 이하만 받는다');
+  perform public._assert_raises(
+    $q$insert into storage.objects (bucket_id, name) values ('defect-photos', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/r1/x.jpg')$q$,
+    '42501', 'A 는 사진 버킷의 남의 폴더에 파일을 올릴 수 없다');
+
   -- 변경 기록 트리거
   update public.defect set action = '지그 교체 + 주기 점검' where id = v_def;
   perform public._assert_eq(
@@ -110,6 +141,8 @@ begin
   perform public._assert_eq(
     (select count(*)::int from public.defect_change_log where row_key = 'r3' and op = 'delete'), 1,
     '이력을 지워도 삭제 기록은 남는다');
+  perform public._assert_eq((select count(*)::int from public.defect_photo where row_key = 'r3'), 0,
+    '이력을 지우면 그 건의 사진 정보도 함께 지워진다(cascade)');
 
   -- UNIQUE · upsert
   perform public._assert_raises(
@@ -167,7 +200,7 @@ declare
   v_def text := current_setting('test.a_def');
 begin
   foreach t in array array['defect', 'class_dict', 'column_mapping', 'app_settings',
-                           'countermeasure_draft', 'defect_change_log']
+                           'countermeasure_draft', 'defect_change_log', 'defect_photo']
   loop
     perform public._assert_rows(format('select 1 from public.%I', t), 0, 'B 에게 A 의 ' || t || ' 가 안 보인다');
   end loop;
@@ -180,6 +213,21 @@ begin
     0, 'B 는 A 의 설정을 고칠 수 없다(0행)');
   perform public._assert_rows('delete from public.class_dict',
     0, 'B 는 A 의 표기 사전을 지울 수 없다(0행)');
+  perform public._assert_rows('delete from public.defect_photo',
+    0, 'B 는 A 의 사진 정보를 지울 수 없다(0행)');
+  perform public._assert_rows($q$select 1 from storage.objects where bucket_id = 'defect-photos'$q$,
+    0, 'B 에게 A 의 사진 파일이 안 보인다');
+  perform public._assert_rows($q$delete from storage.objects where bucket_id = 'defect-photos'$q$,
+    0, 'B 는 A 의 사진 파일을 지울 수 없다(0행)');
+  perform public._assert_raises(
+    $q$insert into public.defect_photo (owner_id, row_key, photo_key, storage_path) values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'r1', 'phB', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r1/phB.jpg')$q$,
+    '42501', 'B 는 A 의 이력에 사진을 붙일 수 없다');
+  perform public._assert_raises(
+    $q$insert into storage.objects (bucket_id, name) values ('defect-photos', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/r1/evil.jpg')$q$,
+    '42501', 'B 는 A 의 사진 폴더에 파일을 올릴 수 없다');
+  insert into storage.objects (bucket_id, name) values ('defect-photos', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/r1/b.jpg');
+  perform public._assert_rows($q$select 1 from storage.objects where bucket_id = 'defect-photos'$q$,
+    1, 'B 는 자기 폴더의 사진 파일만 본다');
 
   perform public._assert_raises(
     $q$insert into public.defect (owner_id, row_key, date) values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'x', '2026-09-01')$q$,
@@ -204,7 +252,7 @@ do $t$
 declare t text;
 begin
   foreach t in array array['defect', 'class_dict', 'column_mapping', 'app_settings',
-                           'countermeasure_draft', 'defect_change_log']
+                           'countermeasure_draft', 'defect_change_log', 'defect_photo']
   loop
     perform public._assert_rows(format('select 1 from public.%I', t), 0, 'anon 에게 ' || t || ' 가 안 보인다');
   end loop;
@@ -212,6 +260,10 @@ begin
     '42501', 'anon 은 불량 이력을 쓸 수 없다');
   perform public._assert_raises($q$insert into public.countermeasure_draft (answer) values ('x')$q$,
     '42501', 'anon 은 대책서 초안을 쓸 수 없다');
+  perform public._assert_rows($q$select 1 from storage.objects where bucket_id = 'defect-photos'$q$,
+    0, 'anon 에게 사진 파일이 안 보인다');
+  perform public._assert_raises($q$insert into storage.objects (bucket_id, name) values ('defect-photos', 'x/y.jpg')$q$,
+    '42501', 'anon 은 사진을 올릴 수 없다');
   perform public._assert_raises($q$insert into public.defect_change_log (defect_id, row_key, op) values (1, 'x', 'insert')$q$,
     '42501', 'anon 은 변경 기록을 쓸 수 없다');
   perform public._assert_raises($q$select public.set_updated_at()$q$,
@@ -252,8 +304,10 @@ end $t$;
 
 -- 정리
 alter table public.defect disable trigger defect_change;
+delete from public.defect_photo;
 delete from public.defect;
 alter table public.defect enable trigger defect_change;
+delete from storage.objects where bucket_id = 'defect-photos';
 delete from public.defect_change_log;
 delete from public.class_dict;
 delete from public.column_mapping;

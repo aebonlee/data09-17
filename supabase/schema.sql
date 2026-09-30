@@ -12,13 +12,16 @@
 --  본인 프로젝트에 올리는 것을 전제로 하므로 테이블 이름에 접두사를 붙이지 않았습니다.
 --  회사 공용 URL·키는 어디에도 들어 있지 않습니다.
 --
---  테이블 (6개)
+--  테이블 (7개) + Storage 버킷 1개
 --    defect             — 품질불량 이력 한 건 (발생일·품번·불량유형·현상·원인·대책·수량 …)
 --    class_dict         — 표기 묶음 사전 (불량유형·원인 분류·발생원인의 다른 표기 → 대표 이름)
 --    column_mapping     — 표준 항목 ↔ 실제 열 이름 연결 (다음 파일에 재사용)
 --    app_settings       — 반복·다발 탐지 기준과 유사 불량 검색 가중치
 --    countermeasure_draft — 대책서 초안 (새 불량 정보·붙인 과거 이력·AI 답변·칸 나눈 결과)
 --    defect_change_log  — 불량 이력 변경 기록 — 기록성, 수정·삭제 불가 (트리거가 자동 기록)
+--    defect_photo       — 불량 이력 한 건에 붙인 사진의 정보 (2026-09-30 추가)
+--                         사진 파일 자체는 비공개 Storage 버킷 defect-photos 에 둔다
+--                         (경로 = <owner_id>/<row_key>/<photo_key>.jpg, 작은 그림은 …_thumb.jpg)
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -141,6 +144,35 @@ create table if not exists public.defect_change_log (
 );
 create index if not exists defect_change_log_idx on public.defect_change_log (owner_id, defect_id, changed_at desc);
 
+-- 불량 사진 정보 (row.photos = [{ id, name, w, h, bytes, memo }] — 2026-09-30 추가)
+--   도구는 지금 사진 본체를 브라우저 IndexedDB 에 두고, DB 로 옮기면 본체는 Storage(비공개 버킷)에 올린다.
+--   이력(defect)을 지우면 사진 정보도 함께 지운다(외래 키 on delete cascade).
+--   ⚠ Storage 의 파일은 외래 키로 지워지지 않는다 — 앱이 defect 를 지울 때 Storage 파일도 함께 지운다.
+create table if not exists public.defect_photo (
+  id           bigint generated always as identity primary key,
+  owner_id     uuid not null default auth.uid(),
+  row_key      text not null,                        -- 붙은 이력의 row_key
+  photo_key    text not null check (length(photo_key) between 1 and 64),   -- 도구의 사진 id ('ph…')
+  sort_order   int not null default 0 check (sort_order >= 0),             -- 건 안에서의 순서
+  name         text not null default '',             -- 원래 파일 이름
+  memo         text not null default '' check (length(memo) <= 200),       -- 사진 설명
+  width        int check (width is null or width between 1 and 1280),      -- 저장본은 긴 변 1280px 이하
+  height       int check (height is null or height between 1 and 1280),
+  bytes        int check (bytes is null or bytes >= 0),
+  storage_path text not null,                        -- defect-photos 버킷 안의 경로
+  thumb_path   text not null default '',
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  -- 경로 첫 폴더는 반드시 본인 id — 다른 사람 폴더를 가리키는 행을 만들 수 없게
+  constraint defect_photo_path_owner check (split_part(storage_path, '/', 1) = owner_id::text),
+  constraint defect_photo_thumb_owner check (thumb_path = '' or split_part(thumb_path, '/', 1) = owner_id::text),
+  -- ⚠ upsert 시 onConflict: 'owner_id,photo_key'
+  constraint defect_photo_owner_key unique (owner_id, photo_key),
+  constraint defect_photo_defect_fk foreign key (owner_id, row_key)
+    references public.defect (owner_id, row_key) on delete cascade on update cascade
+);
+create index if not exists defect_photo_row_idx on public.defect_photo (owner_id, row_key, sort_order);
+
 -- ----------------------------------------------------------------------------
 -- 2. 함수 — search_path 고정
 -- ----------------------------------------------------------------------------
@@ -177,7 +209,7 @@ $fn$;
 do $trg$
 declare t text;
 begin
-  foreach t in array array['defect', 'class_dict', 'column_mapping', 'app_settings', 'countermeasure_draft']
+  foreach t in array array['defect', 'class_dict', 'column_mapping', 'app_settings', 'countermeasure_draft', 'defect_photo']
   loop
     execute format('drop trigger if exists %I on public.%I', t || '_updated_at', t);
     execute format('create trigger %I before update on public.%I for each row execute function public.set_updated_at()',
@@ -200,11 +232,12 @@ alter table public.column_mapping       enable row level security;
 alter table public.app_settings         enable row level security;
 alter table public.countermeasure_draft enable row level security;
 alter table public.defect_change_log    enable row level security;
+alter table public.defect_photo         enable row level security;
 
 do $rls$
 declare t text;
 begin
-  foreach t in array array['defect', 'class_dict', 'column_mapping', 'app_settings', 'countermeasure_draft']
+  foreach t in array array['defect', 'class_dict', 'column_mapping', 'app_settings', 'countermeasure_draft', 'defect_photo']
   loop
     execute format('drop policy if exists %I on public.%I', t || '_select', t);
     execute format('drop policy if exists %I on public.%I', t || '_insert', t);
@@ -229,6 +262,43 @@ create policy defect_change_log_select on public.defect_change_log for select to
   using (owner_id = auth.uid());
 create policy defect_change_log_insert on public.defect_change_log for insert to authenticated
   with check (owner_id = auth.uid());
+
+-- ----------------------------------------------------------------------------
+-- 3-1. Storage — 사진 파일용 비공개 버킷 (2026-09-30 추가)
+--
+--  버킷 defect-photos 는 public = false 다. 공개 주소로는 열리지 않고,
+--  로그인한 본인이 자기 폴더(<본인 id>/…)의 파일만 올리고·보고·바꾸고·지울 수 있다.
+--  화면에 보일 때는 앱이 createSignedUrl(짧은 유효시간)로 주소를 받아 쓴다.
+--  파일 한 개 5MB, JPEG·PNG·WebP 만 받는다(도구가 올리는 것은 1280px JPEG 라 수백 KB).
+--
+--  storage 스키마가 없는 곳(로컬 검증의 옛 스텁 등)에서는 건너뛴다.
+-- ----------------------------------------------------------------------------
+do $st$
+begin
+  if not exists (select 1 from pg_namespace where nspname = 'storage') then
+    raise notice 'storage 스키마가 없어 사진 버킷 설정을 건너뜁니다';
+    return;
+  end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('defect-photos', 'defect-photos', false, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+  on conflict (id) do update set public = false,
+    file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+
+  drop policy if exists defect_photos_select on storage.objects;
+  drop policy if exists defect_photos_insert on storage.objects;
+  drop policy if exists defect_photos_update on storage.objects;
+  drop policy if exists defect_photos_delete on storage.objects;
+  create policy defect_photos_select on storage.objects for select to authenticated
+    using (bucket_id = 'defect-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+  create policy defect_photos_insert on storage.objects for insert to authenticated
+    with check (bucket_id = 'defect-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+  create policy defect_photos_update on storage.objects for update to authenticated
+    using (bucket_id = 'defect-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+    with check (bucket_id = 'defect-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+  create policy defect_photos_delete on storage.objects for delete to authenticated
+    using (bucket_id = 'defect-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+end;
+$st$;
 
 -- ----------------------------------------------------------------------------
 -- 4. 함수 실행 권한
