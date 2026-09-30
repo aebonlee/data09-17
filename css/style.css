@@ -238,9 +238,8 @@ mark { background: #fff0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 .print-only { display: none; }
 
 /* 다음 단계 안내 */
-.next-panel { border-left: 4px solid var(--primary); }
-.next-steps, .next-detail { margin: 0 0 12px; padding-left: 1.3em; }
-.next-steps li, .next-detail li { margin-bottom: 6px; }
+.next-detail { margin: 0 0 12px; padding-left: 1.3em; }
+.next-detail li { margin-bottom: 6px; }
 .checklist { list-style: none; margin: 0 0 12px; padding: 0; }
 .checklist .check { align-items: flex-start; min-height: 0; padding: 6px 0; }
 .checklist .check input { flex: none; margin-top: 3px; }

@@ -364,16 +364,7 @@
 
   // ── 품질 이력 ─────────────────────────────────────────────
   // ── 다음 단계 ─────────────────────────────────────────────
-  // 홈(품질 이력) 위에 두는 짧은 안내. 자세한 것은 #/next.
-  function nextPanel() {
-    return h('section', { class: 'card next-panel', 'aria-labelledby': 'nextPanelTitle' },
-      h('h2', { id: 'nextPanelTitle' }, '다음 단계로 가려면'),
-      h('ol', { class: 'next-steps' },
-        h('li', null, '실제 품질불량 이력 Excel 을 불러와 열을 맞추고, 유사 불량·반복·월간 현황을 써 봐 주세요. 가려야 할 값은 가린 사본으로 해도 됩니다.'),
-        h('li', null, '안 맞았던 점과 기획서 10장 질문의 답을 적어 주세요.'),
-        h('li', null, '「다음 단계」에서 요약 글을 만들어 패들릿 댓글로 올려 주세요. 불량유형별 사진과 대책서가 있으면 몇 장·몇 건인지도 함께 알려 주세요.')),
-      h('div', { class: 'btn-row' }, h('a', { class: 'btn btn-primary', href: '#/next' }, '다음 단계 안내 보기')));
-  }
+  // 품질 이력 화면 위의 「다음 단계로 가려면」 안내는 수강생 요청으로 뺐습니다(2026-09-30). 자세한 것은 메뉴 「다음 단계」(#/next).
   function renderNext(main) {
     main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '다음 단계로 가려면')));
     main.appendChild(h('p', null, '2단계(실제 데이터 보정 · 대책서·표준 문서 검색 · 사진)는 받은 자료에 맞춰 만듭니다. 아래 순서대로 준비해 주세요. 체크한 항목은 이 브라우저에 기억됩니다.'));
@@ -445,10 +436,8 @@
           h('a', { href: 'samples/예시데이터_품질불량이력.csv', download: true }, 'CSV(예시)')),
         h('div', { class: 'btn-row' }, importButton(true), sampleButton(false), templateButton(), restoreButton()),
         h('p', { class: 'note' }, '「백업 되살리기」 — 이 도구의 「백업 내려받기」로 받은 JSON 파일(이력·설정·사진)을 다른 PC·브라우저에서 그대로 되살립니다.')));
-      main.appendChild(nextPanel());
       return;
     }
-    main.appendChild(nextPanel());
 
     var issues = L.validateRows(db.rows);
     var byId = {};
