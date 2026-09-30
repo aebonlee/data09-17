@@ -83,6 +83,8 @@
 
     rows.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
     rows.forEach(function (x, k) { x.mgmt_no = 'EX-Q-' + ('00' + (k + 1)).slice(-3); });
+    // 진행상태(2026-09-30 대시보드용) — 9월 10일까지는 완료, 그 뒤는 조치 중인 것으로 둡니다(가상)
+    rows.forEach(function (x) { x.status = x.date <= '2026-09-10' ? '완료' : '진행중'; });
     return rows;
   }
 

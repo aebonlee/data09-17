@@ -4,38 +4,62 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>품질불량 이력 분석 도구</title>
-  <meta name="description" content="품질불량 이력 Excel을 열 맞추기로 가져와 품번·불량유형·원인별로 관리하고, 유사 불량 검색·반복 불량 탐지·월간 현황·대책서 초안 프롬프트를 만들고 건마다 불량 사진을 붙이는 브라우저 도구">
+  <meta name="description" content="품질불량 이력 Excel을 열 맞추기로 가져와 품번·불량유형·원인별로 관리하고, 대시보드·유사 불량 검색·반복 불량 탐지·월간 현황·대책서 초안 프롬프트를 만들고 건마다 불량 사진을 붙이는 브라우저 도구">
   <meta name="robots" content="noindex">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <a class="skip" href="#main">본문으로 건너뛰기</a>
-  <header class="site-header">
-    <div class="inner header-inner">
-      <a class="brand" href="#/list">
-        <span class="brand-name">품질불량 이력 분석 도구</span>
-        <span class="brand-sub">이력 관리 · 유사 불량 검색 · 반복 탐지 · 월간 현황 · 대책서 초안</span>
+  <!-- 2026-09-30 디자인 요청: 왼쪽 메뉴 + 위 머리 + 대시보드 (수강생 시안 기준) -->
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="메뉴">
+      <a class="side-brand" href="#/home">
+        <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="#ffffff"/><path d="M28.5 12.5a11 11 0 1 0 0 15" fill="none" stroke="#1d4f9c" stroke-width="5.5" stroke-linecap="round"/><circle cx="20" cy="20" r="3.2" fill="#2f7be0"/></svg>
+        <span class="brand-text">CHUNIL<br>TECHWIN</span>
       </a>
-      <nav class="nav" id="nav" aria-label="주 메뉴">
-        <a href="#/list" data-route="list">품질 이력</a>
-        <a href="#/dict" data-route="dict">표기 정리</a>
-        <a href="#/search" data-route="search">유사 불량</a>
-        <a href="#/repeat" data-route="repeat">반복·다발</a>
-        <a href="#/monthly" data-route="monthly">월간 현황</a>
-        <a href="#/draft" data-route="draft">대책서 초안</a>
-        <a href="#/next" data-route="next">다음 단계</a>
+      <nav class="side-nav" id="nav" aria-label="주 메뉴">
+        <a href="#/home" data-route="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>대시보드</span></a>
+        <a href="#/list" data-route="list"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.8h6V4M8.5 10h7M8.5 14h7M8.5 18h4"/></svg><span>품질이력</span></a>
+        <a href="#/search" data-route="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><span>유사불량 검색</span></a>
+        <a href="#/repeat" data-route="repeat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="m7 15 3-4 3 3 4-6"/></svg><span>반복불량 분석</span></a>
+        <a href="#/draft" data-route="draft"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5M14 3v5h5"/></svg><span>대책서 작성</span></a>
+        <a href="#/monthly" data-route="monthly"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M8 16v-3M12 16V9.5M16 16v-5"/></svg><span>월간현황</span></a>
+        <div class="side-sep" role="presentation"></div>
+        <a href="#/dict" data-route="dict" class="side-sub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/><path d="m15 17 2 2 4-4"/></svg><span>표기 정리</span></a>
+        <a href="#/next" data-route="next" class="side-sub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg><span>다음 단계</span></a>
       </nav>
+      <div class="side-bottom">
+        <nav aria-label="설정 메뉴"><a class="side-set" href="#/settings" data-route="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg><span>설정</span></a></nav>
+        <a class="side-ai" href="#/draft"><span class="ai-dot" aria-hidden="true">AI</span><span>AI가 품질이슈 분석을<br>지원합니다.</span></a>
+      </div>
+    </aside>
+    <div class="side-backdrop" id="sideBackdrop" hidden></div>
+
+    <div class="content">
+      <header class="topbar">
+        <button type="button" class="menu-btn" id="menuBtn" aria-controls="sidebar" aria-expanded="false" aria-label="메뉴 열기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <a class="top-title" href="#/home">
+          <span class="top-name">품질불량 이력 분석 도구</span>
+          <span class="top-sub">AI 기반 품질데이터 분석 및 대응 지원 시스템</span>
+        </a>
+        <div class="top-user">
+          <svg class="avatar" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="19" fill="#e6ebf2"/><circle cx="20" cy="15.5" r="6.5" fill="#1b2a44"/><path d="M8 32c2-6 7-9 12-9s10 3 12 9" fill="#1b2a44"/></svg>
+          <span class="user-text"><span>품질팀 <span class="bar-sep" aria-hidden="true">|</span> 관리자</span><span id="nowText" class="now"></span></span>
+        </div>
+      </header>
+
+      <div id="sampleBanner" class="sample-banner" hidden>지금 보이는 것은 <strong>예시 데이터</strong>입니다. 실제 품질 이력이 아닌 가상의 값입니다.</div>
+      <div id="storeBanner" class="store-banner" hidden>이 브라우저에서는 저장소를 쓸 수 없어, 창을 닫으면 데이터가 사라집니다. 작업 후 Excel로 내보내 두세요.</div>
+
+      <main id="main" class="inner main" tabindex="-1"></main>
+
+      <footer class="site-footer">
+        <div class="inner">1단계 시연판 · 파일은 서버로 보내지 않고 이 브라우저 안에서만 계산·저장합니다</div>
+      </footer>
     </div>
-  </header>
-
-  <div id="sampleBanner" class="sample-banner" hidden>지금 보이는 것은 <strong>예시 데이터</strong>입니다. 실제 품질 이력이 아닌 가상의 값입니다.</div>
-  <div id="storeBanner" class="store-banner" hidden>이 브라우저에서는 저장소를 쓸 수 없어, 창을 닫으면 데이터가 사라집니다. 작업 후 Excel로 내보내 두세요.</div>
-
-  <main id="main" class="inner main" tabindex="-1"></main>
-
-  <footer class="site-footer">
-    <div class="inner">1단계 시연판 · 파일은 서버로 보내지 않고 이 브라우저 안에서만 계산·저장합니다</div>
-  </footer>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

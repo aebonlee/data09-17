@@ -192,19 +192,23 @@
   }
 
   // ── 라우팅 ────────────────────────────────────────────────
-  function route() { return (location.hash.replace(/^#\/?/, '').split('/')[0]) || 'list'; }
+  // 2026-09-30 디자인 요청: 처음 화면은 대시보드(#/home). 품질 이력은 #/list 그대로.
+  function route() { return (location.hash.replace(/^#\/?/, '').split('/')[0]) || 'home'; }
   function render() {
     var r = route();
     var main = document.getElementById('main');
     main.textContent = '';
-    document.querySelectorAll('#nav a').forEach(function (a) {
+    document.querySelectorAll('.sidebar a[data-route]').forEach(function (a) {
       var dr = a.getAttribute('data-route');
       if (dr === r || (r === 'import' && dr === 'list')) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     });
     document.getElementById('sampleBanner').hidden = !db._sample;
     if (!S.available()) document.getElementById('storeBanner').hidden = false;
-    if (r === 'import' && imp) renderImport(main);
+    document.body.setAttribute('data-route', r);
+    if (r === 'home') renderHome(main);
+    else if (r === 'settings') renderSettings(main);
+    else if (r === 'import' && imp) renderImport(main);
     else if (r === 'dict') renderDict(main);
     else if (r === 'search') renderSearch(main);
     else if (r === 'repeat') renderRepeat(main);
@@ -214,7 +218,29 @@
     else renderList(main);
     main.setAttribute('data-route', r);
   }
-  window.addEventListener('hashchange', function () { render(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', function () { setMenu(false); render(); window.scrollTo(0, 0); });
+
+  // 좁은 화면(1024px 미만)에서는 왼쪽 메뉴를 「메뉴」 단추로 여닫습니다.
+  var menuBtn = document.getElementById('menuBtn'), sidebar = document.getElementById('sidebar'), backdrop = document.getElementById('sideBackdrop');
+  function setMenu(open) {
+    document.body.classList.toggle('menu-open', open);
+    menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    menuBtn.setAttribute('aria-label', open ? '메뉴 닫기' : '메뉴 열기');
+    backdrop.hidden = !open;
+    if (open) { var first = sidebar.querySelector('a'); if (first) first.focus(); }
+  }
+  menuBtn.addEventListener('click', function () { setMenu(!document.body.classList.contains('menu-open')); });
+  backdrop.addEventListener('click', function () { setMenu(false); menuBtn.focus(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && document.body.classList.contains('menu-open')) { setMenu(false); menuBtn.focus(); } });
+  sidebar.addEventListener('click', function (e) { if (e.target.closest('a')) setMenu(false); });
+  // 머리 오른쪽 날짜·시각 (1분마다)
+  var WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+  function nowText() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    document.getElementById('nowText').textContent = d.getFullYear() + '. ' + p(d.getMonth() + 1) + '. ' + p(d.getDate()) + ' (' + WEEK[d.getDay()] + ') ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  nowText(); setInterval(nowText, 30000);
   var lastW = window.innerWidth;
   window.addEventListener('resize', function () {
     clearTimeout(render._r);
@@ -238,7 +264,7 @@
       db._sample = true;
       save(); closeDialog(); clearPhotos();
       toast('예시 데이터 ' + db.rows.length + '건을 불러왔습니다');
-      if (route() !== 'list') location.hash = '#/list'; else render();
+      if (route() !== 'list' && route() !== 'home') location.hash = '#/list'; else render();
     }
     if (db.rows.length && !db._sample) {
       openDialog('예시 데이터 불러오기', h('p', null, '지금 있는 이력 ' + db.rows.length + '건과 표기 사전' + (L.allPhotoIds(db.rows).length ? '·사진 ' + L.allPhotoIds(db.rows).length + '장' : '') + '을 지우고 예시 데이터로 바꿉니다. 먼저 「백업 내려받기」나 「Excel 내보내기」로 받아 두세요.'), [
@@ -360,6 +386,230 @@
         }, function () { toast('사진을 저장하지 못했습니다. 저장 공간을 확인해 주세요', true); });
       } }, '바꾸기')
     ]);
+  }
+
+  // ── 대시보드 (2026-09-30 디자인 요청) ─────────────────────
+  // 수강생 시안(왼쪽 메뉴·인사 띠·지표 4개·차트 3개·바로가기·최근 이슈·반복 TOP 5·대책서 예시·AI 안내)을 옮겼습니다.
+  // 숫자·차트는 모두 이력에서 계산합니다(logic.js dashboardSummary). 시안의 「불량률」은 생산수량 자료가 없어 「불량수량」으로 바꿨습니다.
+  var dashView = { month: '' };
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function sv(tagName, attrs) {
+    var el = document.createElementNS(SVGNS, tagName);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) { var c = arguments[i]; if (c == null) continue; el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); }
+    return el;
+  }
+  var ICON = {
+    doc: 'M6 3h9l4 4v14H6zM9 12h7M9 16h5M14 3v5h5',
+    gauge: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M12 12l4-4M7.5 16.5h9',
+    repeat: 'M4 9a8 8 0 0 1 14-3l2 2M20 15a8 8 0 0 1-14 3l-2-2M20 4v4h-4M4 20v-4h4',
+    check: 'M4 4h16v16H4zM8 12.5l3 3 5-6',
+    list: 'M5 4h14v17H5zM9 4V2.8h6V4M8.5 10h7M8.5 14h7M8.5 18h4',
+    search: 'M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M15.5 15.5l5 5',
+    chart: 'M3.5 4.5h17v16h-17zM8 16v-3M12 16V9.5M16 16v-5',
+    cal: 'M4 6h16v14H4zM4 10h16M8 3v5M16 3v5',
+    chip: 'M7 7h10v10H7zM10 10h4v4h-4zM9.5 3v4M14.5 3v4M9.5 17v4M14.5 17v4M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4',
+    tick: 'm5 12.5 4.5 4.5L19 7.5',
+    chev: 'm9 6 6 6-6 6',
+    photo: 'M4 6h16v13H4zM8 15l3-3 2 2 3-3 2 2M9 10.5a1.3 1.3 0 1 0 0 .1'
+  };
+  function icon(name, cls) { return sv('svg', { viewBox: '0 0 24 24', class: 'ico' + (cls ? ' ' + cls : ''), 'aria-hidden': 'true' }, sv('path', { d: ICON[name] })); }
+  var DONUT_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'], OTHER_COLOR = '#8b929c';
+  function pctText(n, total) { return total ? Math.round(n / total * 100) + '%' : '0%'; }
+  function deltaLine(d, unit, upIsGood) {
+    if (d.dir === 'same') return h('span', { class: 'delta same' }, '전월과 같음');
+    var good = (d.dir === 'up') === upIsGood;
+    return h('span', { class: 'delta ' + (good ? 'good' : 'bad') },
+      h('span', { 'aria-hidden': 'true' }, d.dir === 'up' ? '▲ ' : '▼ '),
+      h('span', { class: 'sr' }, d.dir === 'up' ? '늘어 ' : '줄어 '),
+      fmt(Math.abs(d.diff)) + unit + (d.pct != null ? ' (' + Math.abs(d.pct) + '%)' : ''));
+  }
+  function kpiCard(title, iconName, value, unit, d, dUnit, upIsGood, note) {
+    return h('div', { class: 'dk' },
+      h('span', { class: 'dk-ico' }, icon(iconName)),
+      h('div', { class: 'dk-body' },
+        h('div', { class: 'dk-t' }, title),
+        h('div', { class: 'dk-v' }, fmt(value), h('small', null, unit)),
+        h('div', { class: 'dk-d' }, h('span', { class: 'dk-dl' }, '전월 대비'), deltaLine(d, dUnit, upIsGood)),
+        note ? h('div', { class: 'dk-note' }, note) : null));
+  }
+  function panel(title, more, body, cls) {
+    return h('section', { class: 'dp' + (cls ? ' ' + cls : '') },
+      h('div', { class: 'dp-head' }, h('h2', null, title), more ? h('a', { class: 'dp-more', href: more[0] }, more[1] || '더보기', icon('chev')) : null),
+      body);
+  }
+  function donut(slices, total) {
+    var R = 60, C = 2 * Math.PI * R, gap = slices.length > 1 ? 2 : 0, acc = 0;
+    var svg = sv('svg', { viewBox: '0 0 160 160', class: 'donut', role: 'img', 'aria-label': '불량유형별 비중 도넛 차트, 총 ' + total + '건' });
+    svg.appendChild(sv('circle', { cx: 80, cy: 80, r: R, fill: 'none', stroke: '#eef1f5', 'stroke-width': 26 }));
+    slices.forEach(function (s, i) {
+      var len = total ? s.count / total * C : 0;
+      var seg = sv('circle', { cx: 80, cy: 80, r: R, fill: 'none', stroke: s.other ? OTHER_COLOR : DONUT_COLORS[i % DONUT_COLORS.length], 'stroke-width': 26,
+        'stroke-dasharray': Math.max(0, len - gap).toFixed(2) + ' ' + C.toFixed(2), 'stroke-dashoffset': (-acc).toFixed(2), transform: 'rotate(-90 80 80)' },
+        sv('title', null, s.key + ' ' + s.count + '건 (' + pctText(s.count, total) + ')'));
+      svg.appendChild(seg);
+      acc += len;
+    });
+    svg.appendChild(sv('text', { x: 80, y: 76, 'text-anchor': 'middle', class: 'donut-k' }, '총'));
+    svg.appendChild(sv('text', { x: 80, y: 98, 'text-anchor': 'middle', class: 'donut-v' }, fmt(total) + '건'));
+    return svg;
+  }
+  // 세로 막대(HTML) — 글자는 HTML 이라 좁은 화면에서도 작아지지 않습니다.
+  function vbars(items, opt) {
+    var max = Math.max.apply(null, items.map(function (x) { return x.value; }).concat([1]));
+    return h('div', { class: 'vbars' + (opt && opt.cls ? ' ' + opt.cls : ''), role: 'img', 'aria-label': opt.label },
+      items.map(function (x) {
+        return h('div', { class: 'vbar', title: x.tip || null },
+          h('span', { class: 'vbar-v' }, fmt(x.value)),
+          h('span', { class: 'vbar-track' }, h('span', { class: 'vbar-fill', style: 'height:' + (x.value ? Math.max(3, x.value / max * 100) : 0) + '%' })),
+          h('span', { class: 'vbar-k' }, x.key),
+          x.sub != null ? h('span', { class: 'vbar-s' }, x.sub) : null);
+      }));
+  }
+  function statusPill(v) {
+    var k = L.statusKind(v);
+    return h('span', { class: 'pill ' + k }, k === 'done' ? '완료' : k === 'open' ? '조치중' : '미입력');
+  }
+  function heroBlock(months) {
+    var opts = (months.length ? months.slice().reverse() : [dashView.month]).map(function (m) { return [m, m.replace('-', '. ')]; });
+    var sel = select('dash_month', opts, dashView.month, { 'aria-label': '볼 달', id: 'dashMonth' });
+    sel.addEventListener('change', function () { dashView.month = sel.value; render(); });
+    var art = sv('svg', { class: 'hero-art', viewBox: '0 0 520 200', preserveAspectRatio: 'xMaxYMid slice', 'aria-hidden': 'true' },
+      sv('circle', { cx: 420, cy: 70, r: 120, fill: 'none', stroke: '#ffffff', 'stroke-opacity': '.10', 'stroke-width': 28 }),
+      sv('circle', { cx: 420, cy: 70, r: 64, fill: 'none', stroke: '#8fb8ff', 'stroke-opacity': '.22', 'stroke-width': 10, 'stroke-dasharray': '18 12' }),
+      sv('circle', { cx: 420, cy: 70, r: 26, fill: '#8fb8ff', 'fill-opacity': '.18' }),
+      sv('path', { d: 'M150 170 L230 140 L290 152 L350 110 L410 124 L470 84 L520 92', fill: 'none', stroke: '#8fb8ff', 'stroke-opacity': '.45', 'stroke-width': 3 }),
+      sv('path', { d: 'M150 200 L150 170 L230 140 L290 152 L350 110 L410 124 L470 84 L520 92 L520 200 Z', fill: '#8fb8ff', 'fill-opacity': '.08' }));
+    return h('section', { class: 'hero' }, art,
+      h('div', { class: 'hero-text' },
+        h('h1', null, '안녕하세요, 품질팀입니다.'),
+        h('p', null, '품질 데이터를 분석해 더 빠르고 정확한 품질 대응을 돕습니다.')),
+      h('label', { class: 'hero-month' }, icon('cal'), h('span', { class: 'sr' }, '볼 달'), sel));
+  }
+  function quickLinks() {
+    var items = [
+      ['#/list', 'list', '품질이력', '이력 조회 및 상세 정보 확인'],
+      ['#/search', 'search', '유사불량 검색', '유사 사례 검색과 당시 원인·대책'],
+      ['#/repeat', 'repeat', '반복불량 분석', '반복·다발 불량 탐지와 기준 설정'],
+      ['#/draft', 'doc', '대책서 작성', '과거 이력을 붙인 대책서 초안'],
+      ['#/monthly', 'chart', '월간현황', '월별 건수·수량 추이와 보고']
+    ];
+    return h('ul', { class: 'quick' }, items.map(function (x) {
+      return h('li', null, h('a', { href: x[0] }, h('span', { class: 'q-ico' }, icon(x[1])), h('span', { class: 'q-t' }, h('strong', null, x[2]), h('span', null, x[3])), icon('chev', 'q-chev')));
+    }));
+  }
+  function aiHelp() {
+    var items = [
+      ['#/draft', '대책서 초안 프롬프트 만들기와 AI 답변 칸 나누기'],
+      ['#/search', '과거 유사 불량 검색과 원인 분석 지원'],
+      ['#/draft', '개선대책·재발방지대책 초안 작성'],
+      ['#/repeat', '반복·다발 불량 탐지(알림은 2단계)']
+    ];
+    return h('section', { class: 'dp ai-help' },
+      h('div', { class: 'dp-head' }, h('h2', null, icon('chip', 'ai-chip'), 'AI가 이렇게 도와드립니다')),
+      h('ul', { class: 'ai-list' }, items.map(function (x) { return h('li', null, icon('tick', 'ai-tick'), h('a', { href: x[0] }, x[1])); })),
+      h('p', { class: 'ai-sign' }, '더 나은 품질을 위한 AI 파트너'));
+  }
+  function renderHome(main) {
+    var all = cdata();
+    var months = L.valuesOf(all.filter(function (r) { return r.date; }), function (r) { return L.monthOf(r.date); });
+    if (!dashView.month || months.indexOf(dashView.month) < 0) dashView.month = months[months.length - 1] || today().slice(0, 7);
+    main.appendChild(heroBlock(months));
+    if (!db.rows.length) {
+      main.appendChild(h('section', { class: 'dp dash-empty' },
+        h('h2', null, '아직 품질 이력이 없습니다'),
+        h('p', null, '품질불량 이력 Excel 을 불러오면 이 화면의 지표·차트가 이력에서 계산되어 채워집니다. 실제 파일이 아직 없으면 예시 데이터로 흐름을 볼 수 있습니다.'),
+        h('div', { class: 'btn-row' }, importButton(true), sampleButton(false), restoreButton())));
+      main.appendChild(h('div', { class: 'dash-low' }, panel('주요 기능 바로가기', null, quickLinks(), 'a-quick'), aiHelp()));
+      return;
+    }
+    var s = L.dashboardSummary(all, dashView.month, db.rule);
+    var c = s.cur, p = s.prev;
+    main.appendChild(h('section', { class: 'dkpis', 'aria-label': dashView.month.replace('-', '. ') + ' 주요 지표' },
+      kpiCard('총 불량건수', 'doc', c.count, '건', L.delta(c.count, p.count), '건', false),
+      kpiCard('불량수량', 'gauge', c.qty, '개', L.delta(c.qty, p.qty), '개', false, '불량률은 생산수량 자료가 없어 수량으로 봅니다'),
+      kpiCard('반복불량 건수', 'repeat', c.repeat, '건', L.delta(c.repeat, p.repeat), '건', false, '반복·다발 기준에 걸린 이 달 건'),
+      kpiCard('개선완료 건수', 'check', c.done, '건', L.delta(c.done, p.done), '건', true, c.withStatus ? null : '이 달 이력에 진행상태(완료여부) 값이 없습니다')));
+
+    // 차트 3개
+    var total = c.count;
+    var legend = h('ul', { class: 'donut-legend' }, s.byType.map(function (x, i) {
+      return h('li', null, h('i', { style: 'background:' + (x.other ? OTHER_COLOR : DONUT_COLORS[i % DONUT_COLORS.length]) }),
+        h('span', { class: 'lg-k', title: x.key + (x.other ? ' (' + x.members + '종)' : '') }, x.key + (x.other ? ' (' + x.members + '종)' : '')), h('span', { class: 'lg-v' }, x.count + '건 (' + pctText(x.count, total) + ')'));
+    }));
+    var typeBody = total ? h('div', { class: 'donut-wrap' }, donut(s.byType, total), legend) : h('p', { class: 'note' }, '이 달 이력이 없습니다.');
+    var partBody = s.byPart.length ? vbars(s.byPart.map(function (g) { return { key: g.key, value: g.count, tip: g.key + ' · ' + g.count + '건 · 수량 ' + fmt(g.qty) }; }), { label: '품번별 불량 건수 상위 5', cls: 'parts' }) : h('p', { class: 'note' }, '이 달 이력이 없습니다.');
+    var dayItems = s.days.map(function (d) { return { key: +d.date.slice(5, 7) + '/' + +d.date.slice(8, 10), value: d.count, sub: '수량 ' + fmt(d.qty), tip: d.date + ' · ' + d.count + '건 · 수량 ' + fmt(d.qty) }; });
+    var dayTitle = '최근 7일 불량 추이';
+    main.appendChild(h('div', { class: 'dcharts' },
+      panel('불량유형별 현황', ['#/list', '품질이력'], typeBody),
+      panel('품번별 불량현황 (Top 5)', ['#/list', '품질이력'], partBody),
+      panel(dayTitle, null, h('div', null,
+        h('p', { class: 'dp-sub' }, s.days[0].date + ' ~ ' + s.days[6].date + ' · 막대 = 불량건수'),
+        vbars(dayItems, { label: dayTitle + ' 막대 차트', cls: 'days' })))));
+
+    // 아래 줄: 바로가기 · 최근 품질이슈 · 반복 TOP 5 · 대책서 예시 · AI 안내
+    var rawById = {};
+    db.rows.forEach(function (r) { rawById[r.id] = r; });
+    var tb = h('tbody');
+    s.recent.forEach(function (r, i) {
+      var raw = rawById[r.id];
+      tb.appendChild(h('tr', { class: 'clickable', tabindex: '0', onclick: function () { editRow(raw); }, onkeydown: function (e) { if (e.key === 'Enter') editRow(raw); } },
+        h('td', { class: 'num' }, String(i + 1)), h('td', { class: 'num' }, r.date), h('td', { class: 'nw' }, r.part_no || ''), h('td', null, r.defect_type || ''),
+        h('td', { class: 'clip', title: r.symptom || null }, h('span', { class: 'clip-1' }, r.symptom || '')), h('td', null, statusPill(r.status))));
+    });
+    var issues = panel('최근 품질이슈', ['#/list'], h('div', { class: 'table-wrap flat' }, h('table', { class: 'list dash-table' },
+      h('thead', null, h('tr', null, ['No', '발생일자', '품번', '불량유형', '불량현상', '상태'].map(function (t) { return h('th', null, t); }))), tb)), 'a-issues');
+
+    var rt = h('tbody');
+    s.repeatTop.forEach(function (g, i) {
+      rt.appendChild(h('tr', null, h('td', null, h('span', { class: 'rank r' + (i + 1) }, String(i + 1))), h('td', null, g.label), h('td', { class: 'num' }, g.count + '건')));
+    });
+    var topBody = s.repeatTop.length ? h('div', { class: 'table-wrap flat' }, h('table', { class: 'list dash-table' },
+      h('thead', null, h('tr', null, h('th', null, '순위'), h('th', null, '묶음'), h('th', { class: 'num' }, '불량건수'))), rt))
+      : h('p', { class: 'note' }, '지금 기준(' + rule() + ')으로 걸린 반복·다발 불량이 없습니다.');
+    var top5 = panel('반복불량 TOP 5', ['#/repeat'], h('div', null, topBody, h('p', { class: 'dp-sub' }, '전체 기간 · ' + rule())), 'a-top');
+
+    var ex = s.example, exBody;
+    if (!ex) exBody = h('p', { class: 'note' }, '개선대책이 적힌 이력이 아직 없습니다.');
+    else {
+      var exRaw = rawById[ex.id], ps = L.photosOf(exRaw);
+      var pic = ps.length
+        ? h('button', { type: 'button', class: 'ex-pic', 'aria-label': '사진 ' + ps.length + '장 크게 보기', onclick: function () { openLightbox(exRaw, 0); } }, thumbImg(ps[0].id, rowTitle(exRaw) + ' 사진'))
+        : h('div', { class: 'ex-pic none' }, icon('photo'), h('span', null, '사진 없음'));
+      var dl = h('dl', { class: 'ex-dl' });
+      [['품번', ex.part_no], ['불량현상', ex.symptom], ['원인', [ex.cause_cat, ex.cause].filter(Boolean).join(' — ')], ['개선대책', ex.action], ['재발방지', ex.prevention]].forEach(function (x) {
+        if (x[1]) { dl.appendChild(h('dt', null, x[0])); dl.appendChild(h('dd', null, h('span', { class: 'clip-2' }, x[1]))); }
+      });
+      exBody = h('div', { class: 'ex' }, pic, h('div', { class: 'ex-main' }, dl,
+        h('div', { class: 'ex-act' }, h('span', { class: 'note' }, rowTitle(ex)), h('button', { type: 'button', class: 'btn btn-primary btn-sm2', onclick: function () { editRow(exRaw); } }, icon('doc'), '대책서 보기'))));
+    }
+    var example = panel('대책서 작성 예시', ['#/draft', '대책서 작성'], exBody, 'a-example');
+    main.appendChild(h('div', { class: 'dash-low' }, panel('주요 기능 바로가기', null, quickLinks(), 'a-quick'), issues, top5, example, aiHelp()));
+  }
+
+  // ── 설정 (시안의 「설정」 메뉴) ───────────────────────────
+  // 새 기능은 없습니다. 흩어져 있던 기준·데이터 관리를 한곳에서 보고, 바꾸는 곳으로 보냅니다.
+  function renderSettings(main) {
+    main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '설정')));
+    var nDict = 0;
+    L.DICT_FIELDS.forEach(function (f) { nDict += Object.keys(db.dict[f] || {}).length; });
+    var st = db.search;
+    var rows = [
+      ['반복·다발 기준', rule(), '#/repeat', '반복불량 분석에서 바꾸기'],
+      ['유사 검색 점수', '같은 품번 +' + st.partBonus + ' · 같은 불량유형 +' + st.typeBonus + ' · ' + st.limit + '건 표시', '#/search', '유사불량 검색 「점수 기준 설정」에서 바꾸기'],
+      ['표기 사전', '직접 정한 대표 이름 ' + nDict + '개', '#/dict', '표기 정리에서 바꾸기'],
+      ['열 연결', Object.keys(db.mapping || {}).length ? '품질불량 이력 ' + Object.keys(db.mapping).length + '개 열 기억' : '아직 불러온 파일 없음', '#/list', 'Excel·CSV 불러오기 때 바뀜']
+    ];
+    main.appendChild(h('section', { class: 'card' }, h('h2', null, '기준'),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'list' }, h('thead', null, h('tr', null, h('th', null, '항목'), h('th', null, '지금 값'), h('th', null, '바꾸는 곳'))),
+        h('tbody', null, rows.map(function (r) { return h('tr', null, h('td', null, h('strong', null, r[0])), h('td', null, r[1]), h('td', null, h('a', { href: r[2] }, r[3]))); }))))));
+    main.appendChild(h('section', { class: 'card' }, h('h2', null, '데이터 관리'),
+      h('p', { class: 'note' }, '이력은 이 브라우저(localStorage), 사진은 IndexedDB 에만 저장됩니다. PC 를 바꾸거나 브라우저 데이터를 지우기 전에 「백업 내려받기」로 받아 두세요.'),
+      h('div', { class: 'btn-row' }, importButton(true), templateButton(),
+        db.rows.length ? h('button', { type: 'button', class: 'btn', onclick: exportAll }, 'Excel 내보내기') : null,
+        h('button', { type: 'button', class: 'btn', onclick: exportBackup }, '백업 내려받기'), restoreButton(), sampleButton(false),
+        db.rows.length ? h('button', { type: 'button', class: 'btn btn-danger', onclick: clearAll }, '전체 삭제') : null)));
   }
 
   // ── 품질 이력 ─────────────────────────────────────────────

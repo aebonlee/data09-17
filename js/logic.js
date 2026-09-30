@@ -991,7 +991,95 @@
     return out.join('\n');
   }
 
+  // ── 대시보드 (2026-09-30 디자인 요청) ─────────────────────────
+  // 진행상태 칸의 값을 「완료 / 조치중 / 미입력」 셋으로 나눕니다. 실제 이력의 「완료여부」 열 값(완료·진행중·O·X 등)을 받습니다.
+  var DONE_WORD = /^(완료|완|종결|조치완료|개선완료|o|y|ok|yes|done)$/i;
+  function statusKind(v) {
+    var s = text(v).replace(/\s+/g, '');
+    if (!s) return 'none';
+    if (/미완료|미결|미조치/.test(s)) return 'open';
+    if (DONE_WORD.test(s) || /완료$/.test(s)) return 'done';
+    return 'open';
+  }
+  function addDaysStr(date, n) {
+    var d = new Date((dayNum(date) + n) * 86400000);
+    return ymd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  }
+  // 끝 날짜까지 n일의 날짜별 건수·수량(빈 날도 0)
+  function lastNDays(rows, endDate, n) {
+    var out = [], idx = {};
+    for (var i = n - 1; i >= 0; i--) { var d = addDaysStr(endDate, -i); idx[d] = out.length; out.push({ date: d, count: 0, qty: 0 }); }
+    rows.forEach(function (r) {
+      if (!r.date || idx[r.date] == null) return;
+      var e = out[idx[r.date]];
+      e.count++;
+      if (r.qty != null) e.qty += r.qty;
+    });
+    return out;
+  }
+  // 도넛용: 건수 많은 순 n-1개 + 나머지를 「기타」로. 전체가 n개 이하면 그대로.
+  function topWithOther(groups, n) {
+    var list = groups.filter(function (g) { return g.count > 0; });
+    if (list.length <= n) return list.map(function (g) { return { key: g.key, count: g.count, qty: g.qty, other: false }; });
+    var head = list.slice(0, n - 1), rest = list.slice(n - 1);
+    return head.map(function (g) { return { key: g.key, count: g.count, qty: g.qty, other: false }; }).concat([{
+      key: '기타', count: rest.reduce(function (s, g) { return s + g.count; }, 0), qty: rest.reduce(function (s, g) { return s + g.qty; }, 0), other: true, members: rest.length
+    }]);
+  }
+  // 대시보드 한 화면에 필요한 값. rows 는 canonRows 를 거친 것, month 는 「2026-09」.
+  function dashboardSummary(rows, month, rule) {
+    var dated = rows.filter(function (r) { return r.date; });
+    var prev = prevMonth(month);
+    var repeats = [];
+    try { repeats = detectRepeats(dated, rule); } catch (e) { repeats = []; }
+    var inRepeat = {};
+    repeats.forEach(function (g) { g.rows.forEach(function (r) { inRepeat[r.id] = true; }); });
+    function stats(m) {
+      var list = dated.filter(function (r) { return monthOf(r.date) === m; });
+      return {
+        count: list.length,
+        qty: list.reduce(function (s, r) { return s + (r.qty || 0); }, 0),
+        repeat: list.filter(function (r) { return inRepeat[r.id]; }).length,
+        done: list.filter(function (r) { return statusKind(r.status) === 'done'; }).length,
+        withStatus: list.filter(function (r) { return statusKind(r.status) !== 'none'; }).length,
+        rows: list
+      };
+    }
+    var cur = stats(month), pre = stats(prev);
+    var monthDates = cur.rows.map(function (r) { return r.date; }).sort();
+    var end = monthDates.length ? monthDates[monthDates.length - 1] : month + '-' + pad(new Date(+month.slice(0, 4), +month.slice(5, 7), 0).getDate());
+    // 반복 묶음 상위 5 — 같은 묶음 이름의 구간은 합쳐 셉니다(전체 기간)
+    var byLabel = {};
+    repeats.forEach(function (g) {
+      var e = byLabel[g.label] || (byLabel[g.label] = { label: g.label, basis: g.basis || '', count: 0, last: '' });
+      e.count += g.count;
+      if (g.last > e.last) e.last = g.last;
+    });
+    var repeatTop = Object.keys(byLabel).map(function (k) { return byLabel[k]; })
+      .sort(function (a, b) { return b.count - a.count || (a.last < b.last ? 1 : a.last > b.last ? -1 : 0) || (a.label < b.label ? -1 : 1); }).slice(0, 5);
+    // 최근: 고른 달 끝까지의 이력 중 최신 순(지난달을 고르면 그달 기준으로 봅니다)
+    var recent = dated.filter(function (r) { return monthOf(r.date) <= month; }).sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+    // 대책서 예시: 개선대책이 적힌 가장 최근 건(재발방지대책까지 있으면 먼저)
+    var withAction = recent.filter(function (r) { return r.action; });
+    var example = withAction.filter(function (r) { return r.prevention; })[0] || withAction[0] || null;
+    return {
+      month: month, prevMonth: prev, cur: cur, prev: pre,
+      byType: topWithOther(groupCount(cur.rows, 'defect_type'), 6),
+      byPart: groupCount(cur.rows, 'part_no').filter(function (g) { return g.key !== '(비어 있음)'; }).slice(0, 5),
+      days: lastNDays(dated, end, 7),
+      recent: recent.slice(0, 5),
+      repeatTop: repeatTop, repeatGroups: repeats.length,
+      example: example
+    };
+  }
+  // 전월 대비: { diff, pct(전월이 0이면 null), dir: 'up'|'down'|'same' }
+  function delta(a, b) {
+    var d = a - b;
+    return { diff: d, pct: b ? Math.round(d / b * 100) : null, dir: d > 0 ? 'up' : d < 0 ? 'down' : 'same' };
+  }
+
   var api = {
+    statusKind: statusKind, lastNDays: lastNDays, topWithOther: topWithOther, dashboardSummary: dashboardSummary, delta: delta, addDaysStr: addDaysStr,
     STD_FIELDS: STD_FIELDS, FIELD: FIELD, DICT_FIELDS: DICT_FIELDS, GROUP_BY: GROUP_BY, DEFAULT_RULE: DEFAULT_RULE,
     DEFAULT_SEARCH: DEFAULT_SEARCH, DRAFT_SECTIONS: DRAFT_SECTIONS,
     emptyDb: emptyDb, toDateStr: toDateStr, parseDate: parseDate, parseNum: parseNum, monthOf: monthOf, dayNum: dayNum,

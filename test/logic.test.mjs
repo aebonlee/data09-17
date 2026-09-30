@@ -459,4 +459,54 @@ test('백업: 다른 파일·깨진 JSON·깨진 사진 자료는 거름', () =>
   assert.equal(bk.db.rows[0].photos, undefined);
 });
 
+console.log('대시보드 (2026-09-30)');
+test('진행상태 값을 완료·조치중·미입력으로 나눔', () => {
+  assert.deepEqual(['완료', ' 완료 ', 'O', 'ok', '조치완료', '종결'].map(L.statusKind), Array(6).fill('done'));
+  assert.deepEqual(['진행중', '미완료', 'X', '대기', '보류', '미결'].map(L.statusKind), Array(6).fill('open'));
+  assert.deepEqual(['', null, '  '].map(L.statusKind), ['none', 'none', 'none']);
+});
+test('최근 7일: 빈 날은 0, 월을 넘어가도 이어짐', () => {
+  const rows = [row({ date: '2026-09-01', qty: 3 }), row({ date: '2026-09-01', qty: 2 }), row({ date: '2026-08-28' }), row({ date: '2026-08-20' })];
+  const d = L.lastNDays(rows, '2026-09-02', 7);
+  assert.deepEqual(d.map(x => x.date), ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02']);
+  assert.deepEqual(d.map(x => x.count), [0, 1, 0, 0, 0, 2, 0]);
+  assert.equal(d[5].qty, 5);
+});
+test('도넛: 6개 넘으면 상위 5 + 기타', () => {
+  const g = [9, 8, 7, 6, 5, 4, 3].map((n, i) => ({ key: 't' + i, count: n, qty: n }));
+  const t = L.topWithOther(g, 6);
+  assert.equal(t.length, 6);
+  assert.deepEqual(t[5], { key: '기타', count: 7, qty: 7, other: true, members: 2 });
+  assert.equal(t.reduce((s, x) => s + x.count, 0), 42);
+  assert.equal(L.topWithOther(g.slice(0, 6), 6).length, 6);
+});
+test('대시보드 요약: 이달·전월 지표가 이력에서 계산됨', () => {
+  const rows = [
+    row({ date: '2026-09-03', part_no: 'A', defect_type: '찍힘', qty: 2, status: '완료', action: '연마', prevention: '점검' }),
+    row({ date: '2026-09-10', part_no: 'A', defect_type: '찍힘', qty: 3, status: '진행중', action: '교체' }),
+    row({ date: '2026-09-12', part_no: 'B', defect_type: '버', qty: 1 }),
+    row({ date: '2026-08-15', part_no: 'C', defect_type: '버', qty: 4, status: '완료' })
+  ];
+  const s = L.dashboardSummary(rows, '2026-09', L.DEFAULT_RULE);
+  assert.equal(s.prevMonth, '2026-08');
+  assert.deepEqual([s.cur.count, s.cur.qty, s.cur.done, s.cur.withStatus], [3, 6, 1, 2]);
+  assert.deepEqual([s.prev.count, s.prev.qty, s.prev.done], [1, 4, 1]);
+  // 반복: 품번 A 2건, 유형 찍힘 2건, 유형 버 2건(8월 C + 9월 B) → 9월 건 3개 모두 반복
+  assert.equal(s.cur.repeat, 3);
+  assert.equal(s.prev.repeat, 1);
+  assert.deepEqual(s.byPart.map(g => [g.key, g.count]), [['A', 2], ['B', 1]]);
+  assert.equal(s.days[6].date, '2026-09-12');
+  assert.equal(s.recent[0].date, '2026-09-12');
+  assert.equal(s.example.date, '2026-09-03'); // 재발방지대책까지 적힌 건이 먼저
+  assert.equal(s.repeatTop.length, 3);
+  assert.equal(L.dashboardSummary(rows, '2026-08', L.DEFAULT_RULE).recent[0].date, '2026-08-15'); // 지난달을 고르면 그달까지만
+  assert.deepEqual(L.delta(3, 1), { diff: 2, pct: 200, dir: 'up' });
+  assert.equal(L.delta(2, 0).pct, null);
+});
+test('예시 데이터에 진행상태가 들어 있어 개선완료 건수가 0 이 아님', () => {
+  const rows = Sample.build().map((r, i) => Object.assign({ id: 's' + i }, r));
+  const s = L.dashboardSummary(rows, '2026-09', L.DEFAULT_RULE);
+  assert.ok(s.cur.done > 0 && s.cur.done < s.cur.count);
+});
+
 console.log('\n' + passed + '개 통과' + (process.exitCode ? ' — 실패 있음' : ''));
