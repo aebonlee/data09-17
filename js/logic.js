@@ -7,25 +7,32 @@
  * 표준 항목(STD_FIELDS)은 기획서 3장 「품질불량 이력」의 가정 열 구성을 옮긴 것입니다.
  * 실제 이력 Excel 샘플을 받기 전이라 열 이름은 가정이며, 수강생 파일의 열 이름은
  * 불러오기 때 「열 맞추기」 단계에서 연결합니다(synonyms 는 자동 추천용).
+ *
+ * 2026-09-30 수강생 답으로 실제 이력의 열 구성이 확정되었습니다(기획서 12장).
+ * 그 연결은 MAPPING_PRESETS 에 「저장된 양식」으로 넣었고, 실제 열 이름을 synonyms 에도 더했습니다.
  */
 (function (root) {
   'use strict';
 
   // ── 표준 항목 ────────────────────────────────────────────────
   var STD_FIELDS = [
-    { key: 'mgmt_no', label: '관리번호', type: 'text', synonyms: ['관리번호', '관리 번호', 'no', '번호', '접수번호', '이슈번호', '불량번호', '문서번호'] },
+    { key: 'mgmt_no', label: '관리번호', type: 'text', synonyms: ['관리번호', '관리 번호', 'no', '번호', '접수번호', '이슈번호', '불량번호', '문서번호', '하자no', '하자 no', '하자번호'] },
     { key: 'date', label: '발생일', type: 'date', required: true, synonyms: ['발생일', '발생일자', '일자', '날짜', '접수일', '발생 일자', '발견일', 'date'] },
     { key: 'part_no', label: '품번', type: 'text', synonyms: ['품번', '품목번호', '부품번호', 'p/n', 'pn', 'partno', '품목코드', '자재번호'] },
     { key: 'part_name', label: '품명', type: 'text', synonyms: ['품명', '품목명', '부품명', '제품명', 'partname'] },
-    { key: 'defect_type', label: '불량유형', type: 'class', synonyms: ['불량유형', '불량 유형', '유형', '불량구분', '불량 구분', '불량명', '불량항목', '결함유형'] },
-    { key: 'symptom', label: '불량현상', type: 'text', synonyms: ['불량현상', '불량 현상', '현상', '불량내용', '불량 내용', '문제점', '이슈내용'] },
+    { key: 'defect_type', label: '불량유형', type: 'class', synonyms: ['불량유형', '불량 유형', '유형', '불량구분', '불량 구분', '불량명', '불량항목', '결함유형', '불량내용', '불량 내용'] },
+    { key: 'symptom', label: '불량현상', type: 'text', synonyms: ['불량현상', '불량 현상', '현상', '문제점', '이슈내용', '현상 조치&조치 사항', '현상조치&조치사항', '현상 및 조치사항'] },
     { key: 'cause_cat', label: '원인 분류', type: 'class', synonyms: ['원인분류', '원인 분류', '원인구분', '원인 구분', '원인유형', '4m'] },
     { key: 'cause', label: '발생원인', type: 'text', synonyms: ['발생원인', '발생 원인', '원인', '원인분석', '불량원인', '추정원인'] },
-    { key: 'action', label: '개선대책', type: 'text', synonyms: ['개선대책', '개선 대책', '대책', '조치', '조치내용', '조치사항', '시정조치'] },
+    { key: 'action', label: '개선대책', type: 'text', synonyms: ['개선대책', '개선 대책', '대책', '조치', '조치내용', '조치사항', '시정조치', '대책수립 진행결과', '대책수립', '대책 수립 진행결과'] },
     { key: 'prevention', label: '재발방지대책', type: 'text', synonyms: ['재발방지대책', '재발방지', '재발 방지', '재발방지 대책', '예방대책'] },
     { key: 'qty', label: '불량수량', type: 'number', synonyms: ['불량수량', '불량 수량', '수량', '불량수', 'qty', '개수'] },
     { key: 'process', label: '공정', type: 'text', synonyms: ['공정', '발생공정', '발생 공정', '공정명', '라인', '작업장'] },
-    { key: 'customer', label: '고객사', type: 'text', synonyms: ['고객사', '고객', '납품처', '업체', '거래처', 'customer'] }
+    { key: 'customer', label: '고객사', type: 'text', synonyms: ['고객사', '고객', '납품처', '업체', '거래처', 'customer'] },
+    // 2026-09-30 추가 — 실제 이력의 「완료여부」 열(대책 진행 상태)을 담는 칸. 재발방지대책과 다른 값이라 따로 둡니다.
+    { key: 'status', label: '진행상태', type: 'text', synonyms: ['진행상태', '진행 상태', '완료여부', '완료 여부', '처리상태', '상태'] },
+    // 2026-09-30 추가 — 어느 자료에서 온 건인지(품질불량 이력 / 공정불량 이력 LIST). 불러오기 때 고른 값이 들어갑니다.
+    { key: 'source', label: '자료 구분', type: 'text', synonyms: ['자료 구분', '자료구분', '출처'] }
   ];
   var FIELD = {};
   STD_FIELDS.forEach(function (f) { FIELD[f.key] = f; });
@@ -35,17 +42,37 @@
 
   // 반복·다발 묶음 기준
   var GROUP_BY = {
+    part_or_defect: null, // 아래에서 채움(순서만 맨 앞으로)
     part_defect: { label: '같은 품번 · 같은 불량유형', keys: ['part_no', 'defect_type'] },
     defect: { label: '같은 불량유형(품번 무관)', keys: ['defect_type'] },
     part: { label: '같은 품번(유형 무관)', keys: ['part_no'] },
     part_cause: { label: '같은 품번 · 같은 원인', keys: ['part_no', 'cause'] }
   };
-  // 사용자가 바꾸기 전의 시작값일 뿐입니다(기획서 10장 6번 「반복·다발 기준」 확인 전).
-  var DEFAULT_RULE = { groupBy: 'part_defect', days: 30, min: 3 };
+  // 2026-09-30 확정(기획서 10장 6번 답): 「동일 품번 또는 동일 불량유형이 반복 발생하는 경우」.
+  // 품번 묶음과 불량유형 묶음을 따로 보고 둘 중 하나라도 걸리면 표시합니다.
+  // 기간은 답에 없어 0(= 기간 제한 없음, 조회 기간 전체)으로 두고, 「반복」은 2건 이상으로 봅니다.
+  GROUP_BY.part_or_defect = { label: '같은 품번 또는 같은 불량유형', keys: null, any: [['part_no'], ['defect_type']] };
+  var DEFAULT_RULE = { groupBy: 'part_or_defect', days: 0, min: 2 };
+  var OLD_DEFAULT_RULE = { groupBy: 'part_defect', days: 30, min: 3 };
+  // 이 브라우저에 옛 시작값이 그대로 저장돼 있으면(사용자가 바꾼 적 없음) 확정 기준으로 바꿉니다.
+  function migrateRule(rule) {
+    if (!rule || typeof rule !== 'object') return Object.assign({}, DEFAULT_RULE);
+    var r = Object.assign({}, DEFAULT_RULE, rule);
+    if (r.groupBy === OLD_DEFAULT_RULE.groupBy && +r.days === OLD_DEFAULT_RULE.days && +r.min === OLD_DEFAULT_RULE.min) return Object.assign({}, DEFAULT_RULE);
+    if (!GROUP_BY[r.groupBy]) r.groupBy = DEFAULT_RULE.groupBy;
+    return r;
+  }
+
+  // ── 자료 구분 ────────────────────────────────────────────────
+  // 품질불량 이력 외에 「공정불량 이력 LIST」(10장 4번 답)를 두 번째 자료로 함께 불러올 수 있습니다.
+  var SOURCES = ['품질불량 이력', '공정불량 이력 LIST'];
+  function sourceOf(r) { return (r && r.source) || SOURCES[0]; }
+  // 파일 이름으로 어느 자료인지 짐작합니다(불러오기 화면에서 고칠 수 있음).
+  function guessSource(fileName) { return /공정\s*불량/.test(String(fileName || '')) ? SOURCES[1] : SOURCES[0]; }
   var DEFAULT_SEARCH = { partBonus: 2, typeBonus: 2, limit: 10 };
 
   function emptyDb() {
-    return { rows: [], mapping: {}, dict: { defect_type: {}, cause_cat: {}, cause: {} }, rule: Object.assign({}, DEFAULT_RULE), search: Object.assign({}, DEFAULT_SEARCH), draft: {}, seq: 0 };
+    return { rows: [], mapping: {}, mappingBySource: {}, dict: { defect_type: {}, cause_cat: {}, cause: {} }, rule: Object.assign({}, DEFAULT_RULE), search: Object.assign({}, DEFAULT_SEARCH), draft: {}, seq: 0 };
   }
 
   // ── 값 다듬기 ────────────────────────────────────────────────
@@ -137,11 +164,68 @@
   function headersOf(aoa, headerRow) {
     return (aoa[headerRow] || []).map(function (c) { return String(c == null ? '' : c).trim(); });
   }
-  function autoMap(headers, saved) {
-    var map = {}, used = {};
-    if (saved) Object.keys(saved).forEach(function (k) {
-      if (FIELD[k] && headers.indexOf(saved[k]) >= 0 && !used[saved[k]]) { map[k] = saved[k]; used[saved[k]] = true; }
+  // ── 저장된 양식 ──────────────────────────────────────────────
+  // 수강생이 알려 준 실제 이력의 열 연결(2026-09-30 「다음 단계 준비 요약」 2번).
+  // 한 가지만 바꿨습니다: 「완료여부」는 재발방지대책이 아니라 진행 상태라서 「진행상태」 칸에 둡니다.
+  var MAPPING_PRESETS = [
+    {
+      id: 'quality_2026_09_30', source: '품질불량 이력', label: '실제 품질불량 이력 양식 (2026-09-30 확인)',
+      mapping: {
+        mgmt_no: '하자NO.', date: '발생일', part_no: '품번', part_name: '품명', defect_type: '불량내용',
+        symptom: '현상 조치&조치 사항', cause_cat: '원인분류', cause: '발생원인', action: '대책수립 진행결과',
+        status: '완료여부', qty: '수량', process: '공정', customer: '고객'
+      }
+    }
+  ];
+  // 열 이름 비교는 띄어쓰기·기호를 무시합니다(「하자 NO」「하자NO.」 모두 같은 열).
+  function findHeader(headers, name) {
+    var k = squash(name);
+    for (var i = 0; i < headers.length; i++) if (headers[i] && squash(headers[i]) === k) return headers[i];
+    return null;
+  }
+  // 파일 열 이름에 양식의 열이 절반 이상 있으면 그 양식을 고릅니다.
+  function pickPreset(headers, source) {
+    var best = null, bestN = 0;
+    MAPPING_PRESETS.forEach(function (p) {
+      if (source && p.source !== source) return;
+      var keys = Object.keys(p.mapping), n = 0;
+      keys.forEach(function (k) { if (findHeader(headers, p.mapping[k])) n++; });
+      if (n * 2 >= keys.length && n > bestN) { best = p; bestN = n; }
     });
+    return best;
+  }
+  function applyPreset(headers, preset) {
+    var map = {};
+    if (!preset) return map;
+    Object.keys(preset.mapping).forEach(function (k) { var h = findHeader(headers, preset.mapping[k]); if (h) map[k] = h; });
+    return map;
+  }
+  // 「완료여부」 같은 진행 상태 열이 재발방지대책에 연결돼 있으면 진행상태로 옮깁니다(이전 판에서 저장한 연결 고치기).
+  function fixMapping(m) {
+    var out = Object.assign({}, m || {});
+    if (out.prevention && !out.status && matchField(out.prevention) === 'status') { out.status = out.prevention; delete out.prevention; return { mapping: out, moved: true }; }
+    return { mapping: out, moved: false };
+  }
+  // 그렇게 저장된 이력의 재발방지대책 칸에 든 「완료」「진행중」 같은 상태 값을 진행상태 칸으로 옮깁니다.
+  var STATUS_WORD = /^(완료|미완료|완|진행|진행중|진행 중|종결|미결|대기|보류|o|x|y|n|ok|ng)$/i;
+  function moveStatusValues(rows) {
+    var n = 0;
+    rows.forEach(function (r) {
+      if (!r.status && r.prevention && STATUS_WORD.test(String(r.prevention).trim())) { r.status = String(r.prevention).trim(); r.prevention = ''; n++; }
+    });
+    return n;
+  }
+  // 순서: ① 이 브라우저에 저장한 연결 → ② 맞는 저장된 양식 → ③ 열 이름 추천(synonyms)
+  function autoMap(headers, saved, opt) {
+    opt = opt || {};
+    var map = {}, used = {};
+    function put(k, h) { if (FIELD[k] && h && !map[k] && !used[h]) { map[k] = h; used[h] = true; } }
+    if (saved) { var fixed = fixMapping(saved).mapping; Object.keys(fixed).forEach(function (k) { put(k, findHeader(headers, fixed[k])); }); }
+    if (opt.preset !== false) {
+      var pre = opt.preset || pickPreset(headers, opt.source);
+      var pm = applyPreset(headers, pre);
+      Object.keys(pm).forEach(function (k) { put(k, pm[k]); });
+    }
     headers.forEach(function (h) {
       if (!h || used[h]) return;
       var k = matchField(h);
@@ -248,6 +332,130 @@
     }).sort(function (a, b) { return b.count - a.count || (a.canonical < b.canonical ? -1 : 1); });
   }
 
+  // ── 유형 묶기 제안 (2026-09-30) ──────────────────────────────
+  // 실제 이력은 불량유형·원인 분류가 자유 기재라(10장 5번 답) 「터미널 밀림 / 단자밀림 / 단자 밀림(미삽입)」처럼
+  // 같은 불량이 여러 표기로 흩어집니다. 아래 규칙으로 표기를 다듬어 같은 「핵심 표기」가 되는 것끼리 묶자고 제안만 합니다.
+  // 사전에 넣는 것은 사용자가 확인하고 누를 때뿐입니다(applyGroup).
+  //   ① 줄바꿈·띄어쓰기 정리
+  //   ② 「시동불능 / 단자밀림」 — 「/」 앞은 차량 증상으로 보고 뒤를 유형으로 (확신 낮음: 기본 선택 안 함)
+  //   ③ 괄호 안 보충 설명 빼기 — 「단자 밀림(미삽입)」「하우징 파손 (CAN PORT)」, 닫는 괄호가 없어도
+  //   ④ 앞의 영문 부위 이름 빼기 — 「LIGHT SW 단자 밀림」「MPT 단자 밀림」
+  //   ⑤ 같은 말 맞추기 — GROUP_SYNONYMS(터미널=단자)
+  // 뜻이 가까울 수 있는 말(GROUP_NEAR: 미삽입≈밀림)과 뒤에 말이 덧붙은 표기(「단자 이종 조립불가」→「단자 이종」)는
+  // 묶음끼리 「합치기」 제안으로 따로 내고, 기본으로 적용하지 않습니다.
+  var GROUP_SYNONYMS = [
+    { from: '터미널', to: '단자', note: '터미널 = 단자' },
+    { from: 'terminal', to: '단자', note: 'terminal = 단자' }
+  ];
+  var GROUP_NEAR = [
+    { from: '미삽입', to: '밀림', note: '미삽입 ≈ 밀림 — 단자가 끝까지 들어가지 않아 밀려 나온 경우를 같은 불량으로 볼지 품질 기준으로 정해 주세요' }
+  ];
+  function hasHangul(x) { return /[가-힣]/.test(x); }
+  function coreOf(value) {
+    var s = text(value).replace(/\s+/g, ' ').trim(), steps = [], sure = true;
+    var segs = s.split(/\s*\/\s*/).filter(function (x) { return x; });
+    if (segs.length >= 2 && segs.every(hasHangul)) {
+      steps.push('「/」 앞 「' + segs.slice(0, -1).join(' / ') + '」은 증상으로 보고 뺌');
+      sure = false;
+      s = segs[segs.length - 1];
+    }
+    var s2 = s.replace(/\s*[(（][^)）]*[)）]\s*/g, ' ').replace(/\s*[(（].*$/, '').replace(/\s+/g, ' ').trim();
+    if (s2 !== s && hasHangul(s2)) { steps.push('괄호 안 보충 설명 뺌'); s = s2; }
+    var m = s.match(/^((?:[A-Za-z0-9][A-Za-z0-9+#&.\-]*\s+)+)(.*[가-힣].*)$/);
+    if (m) { steps.push('앞의 부위 이름 「' + m[1].trim() + '」 뺌'); s = m[2].trim(); }
+    GROUP_SYNONYMS.forEach(function (syn) {
+      var re = new RegExp(syn.from, 'gi');
+      if (re.test(s)) { s = s.replace(re, syn.to); steps.push(syn.note); }
+    });
+    return { text: s, key: squash(s), steps: steps, sure: sure };
+  }
+  function nearKey(key) {
+    var k = key;
+    GROUP_NEAR.forEach(function (n) { k = k.split(squash(n.from)).join(squash(n.to)); });
+    return k;
+  }
+  // 반환: { groups: [{ id, name, key, count, members:[{ key, spelling, spellings, count, steps, sure, current }], done }],
+  //         merges: [{ id, into, intoName, from:[그룹 id], fromNames, count, reason }] }
+  function suggestGroups(rows, field, dict) {
+    var d = (dict && dict[field]) || {};
+    var vals = distinctValues(rows, field, dict);
+    var byCore = {};
+    vals.forEach(function (v) {
+      var c = coreOf(v.spellings[0]);
+      if (!c.key) return;
+      var g = byCore[c.key] || (byCore[c.key] = { id: field + ':' + c.key, key: c.key, members: [], count: 0, names: {} });
+      g.members.push({ key: v.key, spelling: v.spellings[0], spellings: v.spellings, count: v.count, steps: c.steps, sure: c.sure, current: d[v.key] || '' });
+      g.count += v.count;
+      g.names[c.text] = (g.names[c.text] || 0) + v.count * (c.sure ? 2 : 1);
+    });
+    var all = Object.keys(byCore).map(function (k) {
+      var g = byCore[k];
+      // 대표 이름: 가장 많이 쓴 핵심 표기(띄어쓴 표기를 먼저)
+      g.name = Object.keys(g.names).sort(function (a, b) { return g.names[b] - g.names[a] || (b.indexOf(' ') >= 0) - (a.indexOf(' ') >= 0) || (a < b ? -1 : 1); })[0];
+      g.members.sort(function (a, b) { return (b.sure - a.sure) || b.count - a.count || (a.spelling < b.spelling ? -1 : 1); });
+      // 이미 사전에서 모두 같은 이름으로 묶였으면 done
+      var cur = g.members[0].current;
+      g.done = g.members.length >= 2 && !!cur && g.members.every(function (m) { return m.current === cur; });
+      delete g.names;
+      return g;
+    });
+    var groups = all.filter(function (g) { return g.members.length >= 2; })
+      .sort(function (a, b) { return b.count - a.count || (a.name < b.name ? -1 : 1); });
+    // 합치기 제안 — ① 가까운 말(GROUP_NEAR) ② 뒤에 말이 덧붙은 표기
+    var merges = [], taken = {};
+    var byNear = {};
+    all.forEach(function (g) { var nk = nearKey(g.key); (byNear[nk] = byNear[nk] || []).push(g); });
+    Object.keys(byNear).forEach(function (nk) {
+      var list = byNear[nk];
+      if (list.length < 2) return;
+      list.sort(function (a, b) { return b.count - a.count || (a.key < b.key ? -1 : 1); });
+      var into = list[0], from = list.slice(1);
+      var notes = GROUP_NEAR.filter(function (n) { return from.concat([into]).some(function (g) { return g.key.indexOf(squash(n.from)) >= 0; }); }).map(function (n) { return n.note; });
+      from.forEach(function (g) { taken[g.key] = true; });
+      merges.push({ into: into, from: from, reason: notes.join(' / ') || '뜻이 가까운 표기' });
+    });
+    all.forEach(function (g) {
+      if (taken[g.key]) return;
+      var best = null;
+      all.forEach(function (t) {
+        if (t === g || t.key.length < 3 || g.key.length <= t.key.length) return;
+        if (g.key.slice(0, t.key.length) === t.key && (!best || t.key.length > best.key.length)) best = t;
+      });
+      if (!best) return;
+      var tail = g.members[0].spelling.replace(/\s+/g, ' ');
+      merges.push({ into: best, from: [g], reason: '「' + tail + '」은 「' + best.name + '」 뒤에 말이 덧붙은 표기로 보입니다' });
+    });
+    merges = merges.map(function (x) {
+      var target = x.into;
+      var ids = [target].concat(x.from);
+      var names = ids.map(function (g) { return g.name; });
+      var members = [];
+      ids.forEach(function (g) { g.members.forEach(function (m) { members.push(m); }); });
+      var cur = members[0].current;
+      return {
+        id: 'merge:' + field + ':' + ids.map(function (g) { return g.key; }).join('+'),
+        into: target.id, intoName: target.name, from: x.from.map(function (g) { return g.id; }), fromNames: x.from.map(function (g) { return g.name; }),
+        names: names, members: members, count: members.reduce(function (s2, m) { return s2 + m.count; }, 0), reason: x.reason,
+        done: !!cur && members.every(function (m) { return m.current === cur; })
+      };
+    });
+    return { groups: groups, merges: merges };
+  }
+  // 사용자가 확인한 묶음을 사전에 넣습니다. memberKeys = 원래 표기의 squash 키 목록.
+  // 대표 이름과 표기가 같은 키도 넣습니다(나중에 다른 표기가 가장 많아져도 이름이 흔들리지 않게).
+  function applyGroup(dict, field, name, memberKeys) {
+    var n = text(name);
+    if (!n) throw new Error('대표 이름을 적어 주세요');
+    var d = dict[field] || (dict[field] = {});
+    var changed = 0;
+    memberKeys.forEach(function (k) { if (k && d[k] !== n) { d[k] = n; changed++; } });
+    return changed;
+  }
+  function removeGroup(dict, field, memberKeys) {
+    var d = dict[field] || {};
+    memberKeys.forEach(function (k) { delete d[k]; });
+  }
+
   // ── 거르기·집계 ──────────────────────────────────────────────
   // rows 는 canonRows 를 거친 것을 넣습니다.
   function filterRows(rows, f) {
@@ -261,8 +469,9 @@
       if (f.cause && causeKey(r) !== f.cause) return false;
       if (f.process && r.process !== f.process) return false;
       if (f.customer && r.customer !== f.customer) return false;
+      if (f.source && sourceOf(r) !== f.source) return false;
       if (kw) {
-        var hay = [r.mgmt_no, r.part_no, r.part_name, r.defect_type, r.symptom, r.cause_cat, r.cause, r.action, r.prevention, r.process, r.customer].join(' ').toLowerCase();
+        var hay = [r.mgmt_no, r.part_no, r.part_name, r.defect_type, r.symptom, r.cause_cat, r.cause, r.action, r.prevention, r.status, r.process, r.customer].join(' ').toLowerCase();
         if (hay.indexOf(kw) < 0) return false;
       }
       return true;
@@ -306,7 +515,13 @@
     });
     return out;
   }
-  function rowText(r) { return [r.part_name, r.defect_type, r.symptom, r.cause_cat, r.cause, r.process].join(' '); }
+  // 같은 말(터미널=단자 등)은 검색 전에 한 낱말로 맞춥니다 — 「터미널 밀림」으로 찾아도 「단자 밀림」 이력이 걸립니다.
+  function sameWords(s) {
+    var t = String(s == null ? '' : s);
+    GROUP_SYNONYMS.forEach(function (syn) { t = t.replace(new RegExp(syn.from, 'gi'), syn.to); });
+    return t;
+  }
+  function rowText(r) { return sameWords([r.part_name, r.defect_type, r.symptom, r.cause_cat, r.cause, r.process].join(' ')); }
   // 한 낱말이 이력 쪽 낱말과 같거나, 한쪽이 다른 쪽을 품으면(2자 이상) 겹친 것으로 봅니다.
   function tokenHit(q, list) {
     for (var i = 0; i < list.length; i++) {
@@ -319,7 +534,7 @@
   // 점수 = 겹친 낱말 수 + (같은 품번이면 partBonus) + (같은 불량유형이면 typeBonus)
   function searchSimilar(rows, query, opt) {
     opt = Object.assign({}, DEFAULT_SEARCH, opt || {});
-    var qTokens = tokenize(query.text);
+    var qTokens = tokenize(sameWords(query.text));
     var qPart = squash(query.part_no), qType = squash(query.defect_type);
     var res = [];
     rows.forEach(function (r) {
@@ -343,15 +558,34 @@
     var parts = keys.map(function (k) { return k === 'cause' ? causeKey(r) : r[k]; });
     return parts.some(function (p) { return !p; }) ? null : parts;
   }
+  var KEY_LABEL = { part_no: '품번', defect_type: '불량유형', cause: '원인' };
+  // days = 0 이면 기간 제한 없이(조회 기간 전체) 같은 묶음이 M건 이상이면 반복으로 봅니다.
+  // groupBy 가 「같은 품번 또는 같은 불량유형」이면 두 묶음을 따로 탐지해 합칩니다(각 결과에 basis 표시).
   function detectRepeats(rows, rule) {
     rule = Object.assign({}, DEFAULT_RULE, rule || {});
     var days = Math.floor(Number(rule.days)), min = Math.floor(Number(rule.min));
-    if (!(days >= 1) || !(min >= 2)) throw new Error('기간은 1일 이상, 건수는 2건 이상이어야 합니다');
+    if (!(days >= 0) || !(min >= 2)) throw new Error('기간은 0일(제한 없음) 이상, 건수는 2건 이상이어야 합니다');
     var gb = GROUP_BY[rule.groupBy] || GROUP_BY.part_defect;
+    if (gb.any) {
+      var all = [];
+      gb.any.forEach(function (keys) {
+        detectBy(rows, keys, days, min).forEach(function (e) {
+          e.basis = keys.map(function (k) { return KEY_LABEL[k] || k; }).join('·');
+          e.label = e.basis + ': ' + e.label;
+          all.push(e);
+        });
+      });
+      all.sort(function (a, b) { return a.last < b.last ? 1 : a.last > b.last ? -1 : b.count - a.count; });
+      return all;
+    }
+    return detectBy(rows, gb.keys, days, min);
+  }
+  function detectBy(rows, keys, days, min) {
+    var win = days === 0 ? Infinity : days - 1;
     var groups = {};
     rows.forEach(function (r) {
       if (!r.date) return;
-      var parts = groupKeyOf(r, gb.keys);
+      var parts = groupKeyOf(r, keys);
       if (!parts) return;
       var k = parts.join('\u0001');
       (groups[k] = groups[k] || { parts: parts, rows: [] }).rows.push(r);
@@ -364,14 +598,14 @@
       var flag = new Array(list.length);
       var j = 0;
       for (var i = 0; i < list.length; i++) {
-        while (dn[i] - dn[j] > days - 1) j++;
+        while (dn[i] - dn[j] > win) j++;
         if (i - j + 1 >= min) for (var x = j; x <= i; x++) flag[x] = true;
       }
       // 이어진 표시 구간 묶기: 표시된 건끼리 날짜 간격이 N-1일 이하면 같은 구간
       var cur = null;
       for (var y = 0; y < list.length; y++) {
         if (!flag[y]) continue;
-        if (cur && dn[y] - dayNum(cur.last) <= days - 1) { cur.rows.push(list[y]); cur.last = list[y].date; }
+        if (cur && dn[y] - dayNum(cur.last) <= win) { cur.rows.push(list[y]); cur.last = list[y].date; }
         else {
           cur = { parts: g.parts, label: g.parts.join(' · '), first: list[y].date, last: list[y].date, rows: [list[y]] };
           out.push(cur);
@@ -500,10 +734,11 @@
       mgmt_no: '사내 관리번호(사진·대책서와 잇는 키가 있으면 여기)', date: '2026-09-01 형식(엑셀 날짜도 됩니다)',
       part_no: '품번', part_name: '품명', defect_type: '불량유형(표기가 흔들려도 「표기 정리」에서 묶을 수 있습니다)',
       symptom: '불량현상 문장', cause_cat: '원인 분류 열이 따로 있으면 여기(없으면 비워 둡니다)', cause: '발생원인 문장',
-      action: '개선대책', prevention: '재발방지대책', qty: '불량수량(숫자)', process: '발생 공정', customer: '고객사'
+      action: '개선대책', prevention: '재발방지대책', qty: '불량수량(숫자)', process: '발생 공정', customer: '고객사',
+      status: '대책 진행 상태(완료·진행중 등, 「완료여부」 열)', source: '비워 두면 불러올 때 고른 자료 구분(품질불량 이력 / 공정불량 이력 LIST)이 들어갑니다'
     };
     STD_FIELDS.forEach(function (f) { guide.push([f.label, f.required ? '필수' : '', how[f.key] || '']); });
-    guide.push([''], ['한 행 = 불량 1건입니다. 열 이름은 실제 파일 확인 후 바뀔 수 있습니다(가정).']);
+    guide.push([''], ['한 행 = 불량 1건입니다(2026-09-30 확인). 불량유형·원인 분류는 자유 기재여도 「표기 정리」에서 묶을 수 있습니다.']);
     return { '품질불량이력': [stdHeader()], '작성 안내': guide };
   }
   function monthlySheets(totals, report, dictRows) {
@@ -571,8 +806,15 @@
     if (opt.sample) out.push('※ 지금 도구에 든 것은 예시 데이터입니다. 실제 이력을 불러온 뒤 다시 만들어 주세요.');
     out.push('');
     var dates = rows.map(function (r) { return r.date; }).filter(Boolean).sort();
-    out.push('1. 이력 규모: ' + rows.length + '건' + (dates.length ? ', 기간 ' + dates[0] + ' ~ ' + dates[dates.length - 1] + ' (' + monthRange(monthOf(dates[0]), monthOf(dates[dates.length - 1])).length + '개월)' : ''));
-    out.push('2. 내 파일의 열 이름: ' + (headers.length ? headers.join(', ') : '(아직 불러온 파일 없음)'));
+    // 기간은 날수로 적습니다. 달력 달 수로 세면 6/9~9/17(약 3개월)이 「4개월」로 나와 헷갈렸습니다(2026-09-30).
+    if (dates.length) {
+      var spanDays = dayNum(dates[dates.length - 1]) - dayNum(dates[0]) + 1;
+      out.push('1. 이력 규모: ' + rows.length + '건, 기간 ' + dates[0] + ' ~ ' + dates[dates.length - 1] + ' (' + spanDays + '일, 약 ' + Math.max(1, Math.round(spanDays / 30.4)) + '개월)');
+    } else out.push('1. 이력 규모: ' + rows.length + '건');
+    var srcs = valuesOf(rows, sourceOf);
+    if (srcs.length > 1) out.push('   - 자료별: ' + srcs.map(function (x) { return x + ' ' + rows.filter(function (r) { return sourceOf(r) === x; }).length + '건'; }).join(', '));
+    var mappedCols = Object.keys(mapping).map(function (k) { return mapping[k]; });
+    out.push('2. 내 파일의 열 이름: ' + (headers.length ? headers.join(', ') : mappedCols.length ? '(이 브라우저가 파일 열 이름을 기억하지 못했습니다 — 연결한 열만 적습니다)' : '(아직 불러온 파일 없음)'));
     var linked = STD_FIELDS.filter(function (f) { return mapping[f.key]; });
     if (linked.length) out.push('   - 연결한 열: ' + linked.map(function (f) { return f.label + ' ← ' + mapping[f.key]; }).join(', '));
     var used = {};
@@ -580,12 +822,12 @@
     var extra = headers.filter(function (hd) { return !used[hd]; });
     if (extra.length) out.push('   - 연결하지 않은 열: ' + extra.join(', '));
     if (headers.length) {
-      var missing = STD_FIELDS.filter(function (f) { return !mapping[f.key]; }).map(function (f) { return f.label; });
+      var missing = STD_FIELDS.filter(function (f) { return f.key !== 'source' && !mapping[f.key]; }).map(function (f) { return f.label; });
       out.push('   - 파일에 없던 표준 항목: ' + (missing.length ? missing.join(', ') : '없음'));
     }
     var types = groupCount(rows, 'defect_type');
     out.push('3. 불량유형 ' + types.filter(function (g) { return g.key !== '(비어 있음)'; }).length + '가지(건수 많은 순): ' +
-      (types.length ? types.slice(0, 20).map(function (g) { return g.key + ' ' + g.count; }).join(', ') + (types.length > 20 ? ' 외 ' + (types.length - 20) + '가지' : '') : '(없음)'));
+      (types.length ? types.slice(0, 20).map(function (g) { return g.key.replace(/\s+/g, ' ') + ' ' + g.count; }).join(', ') + (types.length > 20 ? ' 외 ' + (types.length - 20) + '가지' : '') : '(없음)'));
     var s = issueSummary(validateRows(rows));
     out.push('4. 도구 검사 결과: 오류 ' + s.error + '건 · 확인 ' + s.warn + '건');
     out.push('5. 써 보니 안 맞았던 점: (적어 주세요)');
@@ -609,7 +851,12 @@
     buildPrompt: buildPrompt, parseDraft: parseDraft,
     stdHeader: stdHeader, standardSheet: standardSheet, templateSheets: templateSheets, monthlySheets: monthlySheets,
     repeatsSheet: repeatsSheet, aoaToCsv: aoaToCsv,
-    PLAN_QUESTIONS: PLAN_QUESTIONS, NEXT_CHECKLIST: NEXT_CHECKLIST, readinessSummary: readinessSummary
+    PLAN_QUESTIONS: PLAN_QUESTIONS, NEXT_CHECKLIST: NEXT_CHECKLIST, readinessSummary: readinessSummary,
+    OLD_DEFAULT_RULE: OLD_DEFAULT_RULE, migrateRule: migrateRule, SOURCES: SOURCES, sourceOf: sourceOf, guessSource: guessSource,
+    MAPPING_PRESETS: MAPPING_PRESETS, findHeader: findHeader, pickPreset: pickPreset, applyPreset: applyPreset,
+    fixMapping: fixMapping, moveStatusValues: moveStatusValues,
+    GROUP_SYNONYMS: GROUP_SYNONYMS, GROUP_NEAR: GROUP_NEAR, coreOf: coreOf, suggestGroups: suggestGroups,
+    applyGroup: applyGroup, removeGroup: removeGroup, sameWords: sameWords
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.QCLogic = api;

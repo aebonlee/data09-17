@@ -245,3 +245,18 @@ mark { background: #fff0a8; color: inherit; padding: 0 1px; border-radius: 2px; 
 .checklist .check { align-items: flex-start; min-height: 0; padding: 6px 0; }
 .checklist .check input { flex: none; margin-top: 3px; }
 .summary-text { width: 100%; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .88rem; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); white-space: pre-wrap; }
+
+/* 묶기 제안 (2026-09-30) — 표기 정리 화면 */
+.suggest-wrap { margin: 16px 0 20px; padding-top: 12px; border-top: 1px solid var(--line); }
+.suggest { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-top: 12px; background: var(--surface); }
+.suggest.merge { background: var(--warn-bg); }
+.suggest-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.suggest-head input { flex: 1 1 200px; min-width: 0; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius); font-weight: 600; }
+.suggest-members { list-style: none; margin: 8px 0; padding: 0; }
+.suggest-members .check { align-items: flex-start; min-height: 0; padding: 6px 0; }
+.suggest-members .check input { flex: none; margin-top: 3px; }
+.suggest-members .check > span { min-width: 0; word-break: keep-all; overflow-wrap: break-word; }
+.suggest-members .hint { display: block; color: var(--muted); font-size: .85rem; }
+.suggest p { margin: 6px 0; }
+.suggest-done { margin-top: 12px; }
+.suggest-done .btn { margin-left: 6px; }

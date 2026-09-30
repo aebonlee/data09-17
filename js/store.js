@@ -21,9 +21,15 @@
     try {
       var p = JSON.parse(raw);
       if (Array.isArray(p.rows)) db.rows = p.rows;
-      if (p.mapping && typeof p.mapping === 'object') db.mapping = p.mapping;
+      if (p.mapping && typeof p.mapping === 'object') {
+        // 2026-09-30: 「완료여부」를 재발방지대책에 연결해 저장했던 경우 진행상태로 옮기고, 이미 불러온 이력의 상태 값도 옮깁니다.
+        var fx = L.fixMapping(p.mapping);
+        db.mapping = fx.mapping;
+        if (fx.moved && Array.isArray(p.rows)) db._statusMoved = L.moveStatusValues(p.rows);
+      }
+      if (p.mappingBySource && typeof p.mappingBySource === 'object') db.mappingBySource = p.mappingBySource;
       if (p.dict && typeof p.dict === 'object') L.DICT_FIELDS.forEach(function (f) { if (p.dict[f] && typeof p.dict[f] === 'object') db.dict[f] = p.dict[f]; });
-      if (p.rule && typeof p.rule === 'object') db.rule = Object.assign({}, L.DEFAULT_RULE, p.rule);
+      if (p.rule && typeof p.rule === 'object') db.rule = L.migrateRule(p.rule); // 옛 시작값(30일 3건)이면 확정 기준으로
       if (p.search && typeof p.search === 'object') db.search = Object.assign({}, L.DEFAULT_SEARCH, p.search);
       if (p.draft && typeof p.draft === 'object') db.draft = p.draft;
       if (typeof p.seq === 'number') db.seq = p.seq;

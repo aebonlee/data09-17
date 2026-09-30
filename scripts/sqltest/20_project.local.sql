@@ -86,7 +86,15 @@ begin
 
   perform public._assert_eq((select owner_id from public.defect where id = v_def),
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid, 'owner_id 가 auth.uid() 로 자동으로 채워진다');
-  perform public._assert_eq((select min_count from public.app_settings), 3, '탐지 기준 기본값이 도구 기본값(30일 3건)과 같다');
+  perform public._assert_eq((select min_count || '/' || days || '/' || group_by from public.app_settings), '2/0/part_or_defect',
+    '탐지 기준 기본값이 도구 기본값(같은 품번 또는 같은 유형, 기간 제한 없음, 2건)과 같다');
+  perform public._assert_eq((select count(*)::int from information_schema.columns
+      where table_schema = 'public' and table_name = 'defect' and column_name in ('status', 'source')), 2,
+    '진행상태(status)·자료 구분(source) 칸이 있다');
+  update public.column_mapping set mapping_by_source = '{"공정불량 이력 LIST":{"date":"일자"}}';
+  perform public._assert_raises(
+    $q$update public.column_mapping set mapping_by_source = '[]'$q$,
+    '23514', '자료별 열 연결은 객체만 받는다');
   perform public._assert((select strpos(answer, E'\n') > 0 from public.countermeasure_draft where id = v_draft),
     'AI 답변의 줄바꿈이 그대로 저장된다');
 
@@ -124,13 +132,15 @@ begin
     '23514', '표기 사전은 불량유형·원인 분류·발생원인에만 쓴다');
   perform public._assert_raises(
     $q$update public.app_settings set group_by = 'customer'$q$,
-    '23514', '반복·다발 묶음 기준은 정해진 4가지만 받는다');
+    '23514', '반복·다발 묶음 기준은 정해진 5가지만 받는다');
+  update public.app_settings set group_by = 'part', days = 30;
+  update public.app_settings set group_by = 'part_or_defect', days = 0;
   perform public._assert_raises(
     $q$update public.app_settings set min_count = 1$q$,
     '23514', '다발 기준 건수는 2건 이상이다');
   perform public._assert_raises(
-    $q$update public.app_settings set days = 0$q$,
-    '23514', '기간은 1일 이상이다');
+    $q$update public.app_settings set days = -1$q$,
+    '23514', '기간은 0(제한 없음) 이상이다');
 
   update public.countermeasure_draft set updated_at = '2000-01-01' where id = v_draft;
   perform public._assert((select updated_at > '2001-01-01' from public.countermeasure_draft where id = v_draft),

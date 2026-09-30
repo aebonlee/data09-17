@@ -25,7 +25,8 @@
 -- 1. 테이블
 -- ----------------------------------------------------------------------------
 
--- 불량 이력 (logic.js STD_FIELDS 13개 + 도구가 붙이는 id·_src)
+-- 불량 이력 (logic.js STD_FIELDS 15개 + 도구가 붙이는 id·_src)
+--   2026-09-30: status(진행상태 — 실제 이력의 「완료여부」)·source(자료 구분 — 품질불량 이력 / 공정불량 이력 LIST) 추가
 --   도구의 입력값 검사에서 「오류」인 행(발생일 없음·못 읽음, 수량 음수·못 읽음)은
 --   DB 가 받지 않는다. 도구 화면에서 고친 뒤 저장한다. 「주의」(품번·불량유형 빈칸)는 받는다.
 create table if not exists public.defect (
@@ -45,6 +46,8 @@ create table if not exists public.defect (
   qty          numeric check (qty is null or qty >= 0),   -- 불량수량 (비어 있을 수 있음, 음수 불가)
   process      text not null default '',             -- 공정
   customer     text not null default '',             -- 고객사
+  status       text not null default '',             -- 진행상태 (완료여부)
+  source       text not null default '',             -- 자료 구분 (빈 값 = 품질불량 이력)
   src          text not null default '',             -- 가져온 곳 ('파일 / 시트 12행')
   is_sample    boolean not null default false,       -- _sample
   created_at   timestamptz not null default now(),
@@ -53,6 +56,9 @@ create table if not exists public.defect (
   -- ⚠ upsert 시 onConflict: 'owner_id,row_key'
   constraint defect_owner_row_key unique (owner_id, row_key)
 );
+-- 이전 판으로 이미 만든 표에도 새 칸을 더한다(재실행 안전)
+alter table public.defect add column if not exists status text not null default '';
+alter table public.defect add column if not exists source text not null default '';
 create index if not exists defect_owner_date_idx on public.defect (owner_id, date desc);
 create index if not exists defect_part_type_idx  on public.defect (owner_id, part_no, defect_type);
 
@@ -72,6 +78,8 @@ create table if not exists public.class_dict (
 create table if not exists public.column_mapping (
   owner_id    uuid primary key default auth.uid(),
   mapping     jsonb not null default '{}'::jsonb check (jsonb_typeof(mapping) = 'object'),
+  -- 2026-09-30: 품질불량 이력 밖의 자료(공정불량 이력 LIST 등)의 열 연결 { 자료 구분: { 표준 항목: 열 이름 } }
+  mapping_by_source jsonb not null default '{}'::jsonb check (jsonb_typeof(mapping_by_source) = 'object'),
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -79,16 +87,29 @@ create table if not exists public.column_mapping (
 -- 탐지 기준·검색 가중치 (DEFAULT_RULE · DEFAULT_SEARCH) — 사용자당 한 행
 create table if not exists public.app_settings (
   owner_id      uuid primary key default auth.uid(),
-  group_by      text not null default 'part_defect'
-                check (group_by in ('part_defect', 'defect', 'part', 'part_cause')),
-  days          int not null default 30 check (days >= 1),        -- N일 안에
-  min_count     int not null default 3  check (min_count >= 2),   -- M건 이상 (rule.min)
+  -- 2026-09-30 확정 기준: 같은 품번 또는 같은 불량유형이 기간 제한 없이(days = 0) 2건 이상
+  group_by      text not null default 'part_or_defect',
+  days          int not null default 0 check (days >= 0),         -- N일 안에 (0 = 기간 제한 없음)
+  min_count     int not null default 2  check (min_count >= 2),   -- M건 이상 (rule.min)
   part_bonus    numeric not null default 2 check (part_bonus >= 0),
   type_bonus    numeric not null default 2 check (type_bonus >= 0),
   search_limit  int not null default 10 check (search_limit >= 1),  -- search.limit
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+
+-- 이전 판으로 만든 표 고치기(재실행 안전): 칸 추가, 묶음 기준·기간 제약과 기본값을 확정 기준으로
+alter table public.column_mapping add column if not exists mapping_by_source jsonb not null default '{}'::jsonb;
+alter table public.column_mapping drop constraint if exists column_mapping_mapping_by_source_check;
+alter table public.column_mapping add constraint column_mapping_mapping_by_source_check check (jsonb_typeof(mapping_by_source) = 'object');
+alter table public.app_settings drop constraint if exists app_settings_group_by_check;
+alter table public.app_settings add constraint app_settings_group_by_check
+  check (group_by in ('part_or_defect', 'part_defect', 'defect', 'part', 'part_cause'));
+alter table public.app_settings drop constraint if exists app_settings_days_check;
+alter table public.app_settings add constraint app_settings_days_check check (days >= 0);
+alter table public.app_settings alter column group_by set default 'part_or_defect';
+alter table public.app_settings alter column days set default 0;
+alter table public.app_settings alter column min_count set default 2;
 
 -- 대책서 초안 (db.draft = { input, picked, answer, parsed })
 -- 지금 도구는 하나만 기억하지만 DB 에서는 쓴 초안을 쌓아 둔다.

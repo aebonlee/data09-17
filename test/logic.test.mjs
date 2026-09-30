@@ -37,7 +37,7 @@ test('못 읽은 값은 _raw 에 남고 검사에서 오류', () => {
 console.log('열 맞추기');
 test('다른 열 이름을 표준 항목으로 추천', () => {
   const m = L.autoMap(['NO', '발생 일자', 'P/N', '부품명', '불량 구분', '불량내용', '원인', '조치내용', '수량', '라인', '비고']);
-  assert.deepEqual(m, { mgmt_no: 'NO', date: '발생 일자', part_no: 'P/N', part_name: '부품명', defect_type: '불량 구분', symptom: '불량내용', cause: '원인', action: '조치내용', qty: '수량', process: '라인' });
+  assert.deepEqual(m, { mgmt_no: 'NO', date: '발생 일자', part_no: 'P/N', part_name: '부품명', defect_type: '불량 구분', cause: '원인', action: '조치내용', qty: '수량', process: '라인' });
 });
 test('저장한 연결이 자동 추천보다 먼저', () => {
   const m = L.autoMap(['일자', '작성일'], { date: '작성일' });
@@ -137,8 +137,8 @@ test('10일 안 3건: 다섯 건이 한 구간으로 이어짐', () => {
 });
 test('경계: 9/1~9/10 은 10일 창(차이 9일)에 들지만 9일 창에는 안 듦', () => {
   const three = rep.slice(0, 3);
-  assert.equal(L.detectRepeats(three, { days: 10, min: 3 }).length, 1);
-  assert.equal(L.detectRepeats(three, { days: 9, min: 3 }).length, 0);
+  assert.equal(L.detectRepeats(three, { groupBy: 'part_defect', days: 10, min: 3 }).length, 1);
+  assert.equal(L.detectRepeats(three, { groupBy: 'part_defect', days: 9, min: 3 }).length, 0);
 });
 test('묶음 기준 「같은 불량유형」이면 품번 B 도 함께 셈', () => {
   const r = L.detectRepeats(rep, { groupBy: 'defect', days: 3, min: 4 });
@@ -147,11 +147,11 @@ test('묶음 기준 「같은 불량유형」이면 품번 B 도 함께 셈', ()
   assert.deepEqual([r[0].label, r[0].count, r[0].qty], ['찍힘', 4, 11]);
 });
 test('품번이 빈 행은 품번 묶음에서 빠짐', () => {
-  const r = L.detectRepeats([row({ date: '2026-09-01', part_no: '', defect_type: '찍힘' }), row({ date: '2026-09-01', part_no: '', defect_type: '찍힘' })], { days: 1, min: 2 });
+  const r = L.detectRepeats([row({ date: '2026-09-01', part_no: '', defect_type: '찍힘' }), row({ date: '2026-09-01', part_no: '', defect_type: '찍힘' })], { groupBy: 'part_defect', days: 1, min: 2 });
   assert.equal(r.length, 0);
 });
 test('잘못된 기준값은 오류', () => {
-  assert.throws(() => L.detectRepeats(rep, { days: 0, min: 3 }));
+  assert.throws(() => L.detectRepeats(rep, { days: -1, min: 3 }));
   assert.throws(() => L.detectRepeats(rep, { days: 7, min: 1 }));
 });
 
@@ -217,7 +217,7 @@ test('요약 글: 열 이름·건수·기간·유형은 넣고, 품번·고객�
     row({ date: '2026-02-11', part_no: 'PN-SECRET-1', defect_type: '찍힘' })
   ];
   const txt = L.readinessSummary(rows, { mapping: { date: '일자', part_no: 'P/N', defect_type: '불량 구분' }, headers: ['일자', 'P/N', '불량 구분', '비고'] });
-  assert.match(txt, /3건, 기간 2026-01-05 ~ 2026-03-20 \(3개월\)/);
+  assert.match(txt, /3건, 기간 2026-01-05 ~ 2026-03-20 \(75일, 약 2개월\)/);
   assert.match(txt, /열 이름: 일자, P\/N, 불량 구분, 비고/);
   assert.match(txt, /발생일 ← 일자/);
   assert.match(txt, /연결하지 않은 열: 비고/);
@@ -238,6 +238,138 @@ test('다음 단계 체크 목록: 키 중복 없음, 두 묶음', () => {
   const keys = L.NEXT_CHECKLIST.map(c => c.key);
   assert.equal(new Set(keys).size, keys.length);
   assert.deepEqual([...new Set(L.NEXT_CHECKLIST.map(c => c.group))], ['now', 'send']);
+});
+
+console.log('2026-09-30 실제 이력 반영');
+// 수강생 요약 글의 불량유형 19가지(값이 아닌 유형 이름만, 셀 안 줄바꿈 그대로). 품번·날짜는 지어낸 값.
+const REAL_TYPES = [
+  ['터미널 밀림', 3], ['단자밀림', 2], ['RING 단자 이종', 1], ['케이블 그룹 내 불량 규격(PB+) 2개 묶음 조립', 1], ['터미널 미삽입', 1],
+  ['LIGHT SW 단자 밀림', 1], ['MPT 단자 밀림', 1], ['OPT POWER\n연결 누락', 1], ['단자 미삽입\n(조립불량', 1], ['단자 밀림(미삽입)', 1],
+  ['단자 벌어짐\n접촉불량', 1], ['단자 이종\n조립불가', 1], ['라벨 이종', 1], ['마스트작동불능 / \n단자 밀림', 1], ['부품누락(클립)', 1],
+  ['시동불능 / 단자밀림', 1], ['피복 탈피 불량으로 심선 가닥수가 적어 인장력이 안나옴', 1], ['하우징 파손\n(CAN PORT)', 1], ['회로오배', 1]
+];
+function realRows() {
+  const out = []; let d = 9;
+  REAL_TYPES.forEach(([t, n], i) => { for (let k = 0; k < n; k++) { d += 4; const dt = new Date(Date.UTC(2026, 5, d)); out.push(row({ date: dt.toISOString().slice(0, 10), part_no: 'P' + (i % 7), defect_type: t, qty: 1 })); } });
+  return out;
+}
+test('실제 이력 모양: 22건, 표기 19가지', () => {
+  const rs = realRows();
+  assert.equal(rs.length, 22);
+  assert.equal(L.distinctValues(rs, 'defect_type').length, 19);
+});
+test('핵심 표기: 괄호·앞 영문 부위·터미널=단자·「/」 앞 증상', () => {
+  assert.equal(L.coreOf('단자 밀림(미삽입)').text, '단자 밀림');
+  assert.equal(L.coreOf('단자 미삽입\n(조립불량').text, '단자 미삽입');       // 닫는 괄호 없음
+  assert.equal(L.coreOf('하우징 파손\n(CAN PORT)').text, '하우징 파손');
+  assert.equal(L.coreOf('LIGHT SW 단자 밀림').text, '단자 밀림');
+  assert.equal(L.coreOf('OPT POWER\n연결 누락').text, '연결 누락');
+  assert.equal(L.coreOf('터미널 밀림').text, '단자 밀림');
+  const slash = L.coreOf('시동불능 / 단자밀림');
+  assert.equal(slash.text, '단자밀림');
+  assert.equal(slash.sure, false);                                            // 「/」 규칙은 확신 낮음
+  assert.equal(L.coreOf('회로오배').steps.length, 0);
+});
+test('묶기 제안: 단자 밀림 묶음(확신 7표기 + 확인 2표기), 단자 미삽입 묶음', () => {
+  const sg = L.suggestGroups(realRows(), 'defect_type', L.emptyDb().dict);
+  const push = sg.groups.find(g => g.name === '단자 밀림');
+  assert.ok(push, '단자 밀림 묶음이 없음');
+  const sure = push.members.filter(m => m.sure).map(m => m.spelling).sort();
+  assert.deepEqual(sure, ['LIGHT SW 단자 밀림', 'MPT 단자 밀림', '단자 밀림(미삽입)', '단자밀림', '터미널 밀림'].sort());
+  assert.deepEqual(push.members.filter(m => !m.sure).map(m => m.spelling).sort(), ['마스트작동불능 / \n단자 밀림', '시동불능 / 단자밀림'].sort());
+  const ins = sg.groups.find(g => g.name === '단자 미삽입');
+  assert.deepEqual(ins.members.map(m => m.spelling).sort(), ['단자 미삽입\n(조립불량', '터미널 미삽입'].sort());
+  // 한 표기뿐인 것(회로오배 등)은 제안하지 않음
+  assert.equal(sg.groups.length, 2);
+});
+test('합치기 제안: 미삽입≈밀림(확인), 「단자 이종 조립불가」→「단자 이종」, 라벨 이종은 안 붙음', () => {
+  const sg = L.suggestGroups(realRows(), 'defect_type', L.emptyDb().dict);
+  const near = sg.merges.find(m => m.intoName === '단자 밀림');
+  assert.ok(near && near.fromNames.includes('단자 미삽입') && /미삽입 ≈ 밀림/.test(near.reason));
+  const kind = sg.merges.find(m => m.intoName === '단자 이종');
+  assert.ok(kind && kind.fromNames[0] === '단자 이종 조립불가');
+  assert.ok(!sg.merges.some(m => m.names.includes('라벨 이종')));
+});
+test('확인한 묶음을 사전에 넣으면 집계·반복 탐지가 묶인 유형으로 셈', () => {
+  const rs = realRows();
+  const dict = L.emptyDb().dict;
+  const before = L.groupCount(L.canonRows(dict, rs), 'defect_type');
+  assert.deepEqual([before[0].key, before[0].count], ['터미널 밀림', 3]);
+  const g = L.suggestGroups(rs, 'defect_type', dict).groups.find(x => x.name === '단자 밀림');
+  assert.equal(L.applyGroup(dict, 'defect_type', g.name, g.members.filter(m => m.sure).map(m => m.key)), 5);
+  const after = L.groupCount(L.canonRows(dict, rs), 'defect_type');
+  assert.deepEqual([after[0].key, after[0].count], ['단자 밀림', 8]);
+  const rp = L.detectRepeats(L.canonRows(dict, rs), { groupBy: 'defect', days: 0, min: 2 });
+  assert.equal(rp.find(e => e.label === '단자 밀림').count, 8);
+  // 이미 묶은 제안은 done
+  assert.equal(L.suggestGroups(rs, 'defect_type', dict).groups.find(x => x.name === '단자 밀림').done, false); // 확인 2표기는 아직
+  L.applyGroup(dict, 'defect_type', '단자 밀림', g.members.map(m => m.key));
+  assert.equal(L.suggestGroups(rs, 'defect_type', dict).groups.find(x => x.name === '단자 밀림').done, true);
+  L.removeGroup(dict, 'defect_type', g.members.map(m => m.key));
+  assert.equal(Object.keys(dict.defect_type).length, 0);
+  assert.throws(() => L.applyGroup(dict, 'defect_type', ' ', ['a']));
+});
+test('반복 기준(확정): 같은 품번 또는 같은 유형, 기간 제한 없이 2건 이상', () => {
+  assert.deepEqual(L.DEFAULT_RULE, { groupBy: 'part_or_defect', days: 0, min: 2 });
+  const rs = [
+    row({ date: '2026-06-10', part_no: 'P1', defect_type: '단자 밀림' }),
+    row({ date: '2026-09-10', part_no: 'P1', defect_type: '라벨 이종' }),   // 같은 품번, 3개월 간격
+    row({ date: '2026-07-01', part_no: 'P2', defect_type: '단자 밀림' }),   // 같은 유형, 다른 품번
+    row({ date: '2026-07-02', part_no: 'P3', defect_type: '회로오배' })
+  ];
+  const r = L.detectRepeats(rs);
+  assert.deepEqual(r.map(e => e.label).sort(), ['불량유형: 단자 밀림', '품번: P1']);
+  assert.equal(r.find(e => e.basis === '품번').span, 93);
+  // 기간을 30일로 좁히면 품번 P1(93일 간격)은 빠짐
+  assert.deepEqual(L.detectRepeats(rs, { groupBy: 'part_or_defect', days: 30, min: 2 }).map(e => e.label), ['불량유형: 단자 밀림']);
+});
+test('저장된 옛 시작값(30일 3건)만 확정 기준으로 바뀌고, 사용자가 바꾼 값은 그대로', () => {
+  assert.deepEqual(L.migrateRule({ groupBy: 'part_defect', days: 30, min: 3 }), L.DEFAULT_RULE);
+  assert.deepEqual(L.migrateRule({ groupBy: 'part', days: 60, min: 2 }), { groupBy: 'part', days: 60, min: 2 });
+  assert.deepEqual(L.migrateRule(null), L.DEFAULT_RULE);
+  assert.equal(L.migrateRule({ groupBy: '없는기준', days: 5, min: 2 }).groupBy, 'part_or_defect');
+});
+const REAL_HEADERS = ['하자NO.', '발생일', '고객', '품번', '품명', '공정', '불량내용', '수량', '현상 조치&조치 사항', '원인분류', '발생원인', '대책수립 진행결과', '완료여부', '비고'];
+test('저장된 양식: 실제 열 이름을 그대로 연결(완료여부 → 진행상태)', () => {
+  const p = L.pickPreset(REAL_HEADERS);
+  assert.ok(p && p.id === 'quality_2026_09_30');
+  const m = L.autoMap(REAL_HEADERS);
+  assert.deepEqual(m, { mgmt_no: '하자NO.', date: '발생일', part_no: '품번', part_name: '품명', defect_type: '불량내용', symptom: '현상 조치&조치 사항',
+    cause_cat: '원인분류', cause: '발생원인', action: '대책수립 진행결과', status: '완료여부', qty: '수량', process: '공정', customer: '고객' });
+  // 띄어쓰기·마침표가 달라도(「하자 NO」) 같은 열
+  assert.equal(L.autoMap(REAL_HEADERS.map(h => h === '하자NO.' ? '하자 NO' : h)).mgmt_no, '하자 NO');
+  assert.equal(L.pickPreset(['일자', 'P/N', '불량 구분']), null);
+});
+test('이전 판 연결 고치기: 재발방지대책 ← 완료여부 를 진행상태로, 저장된 상태 값도 옮김', () => {
+  const f = L.fixMapping({ date: '발생일', prevention: '완료여부' });
+  assert.equal(f.moved, true);
+  assert.deepEqual(f.mapping, { date: '발생일', status: '완료여부' });
+  assert.equal(L.fixMapping({ prevention: '재발방지대책' }).moved, false);
+  const rs = [row({ prevention: '완료' }), row({ prevention: '진행중' }), row({ prevention: '작업표준서 개정, 교육 실시' })];
+  assert.equal(L.moveStatusValues(rs), 2);
+  assert.deepEqual(rs.map(r => [r.status, r.prevention]), [['완료', ''], ['진행중', ''], ['', '작업표준서 개정, 교육 실시']]);
+  // 저장된 연결이 옛 방식이어도 autoMap 결과는 진행상태
+  assert.equal(L.autoMap(REAL_HEADERS, { prevention: '완료여부' }).status, '완료여부');
+});
+test('유사 검색: 「터미널 밀림」으로 찾아도 「단자 밀림」 이력이 걸림', () => {
+  const rs = [row({ defect_type: '단자 밀림', symptom: '커넥터 단자 밀림' }), row({ defect_type: '라벨 이종' })];
+  const res = L.searchSimilar(rs, { text: '터미널 밀림' });
+  assert.equal(res.length, 1);
+  assert.deepEqual(res[0].matched, ['단자', '밀림']);
+});
+test('두 번째 자료(공정불량 이력 LIST): 자료 구분 거르기·파일 이름 짐작', () => {
+  assert.equal(L.guessSource('공정불량 이력 LIST_2026.xlsx'), '공정불량 이력 LIST');
+  assert.equal(L.guessSource('품질불량이력.xlsx'), '품질불량 이력');
+  const rs = [row({ date: '2026-09-01' }), row({ date: '2026-09-02', source: '공정불량 이력 LIST' })];
+  assert.equal(L.filterRows(rs, { source: '품질불량 이력' }).length, 1);   // 빈 값은 품질불량 이력
+  assert.equal(L.filterRows(rs, { source: '공정불량 이력 LIST' }).length, 1);
+  assert.match(L.readinessSummary(rs, {}), /자료별: 공정불량 이력 LIST 1건, 품질불량 이력 1건/);
+});
+test('요약 글: 열 이름을 기억 못 했으면 그렇게 적고, 유형 이름의 줄바꿈은 한 칸으로', () => {
+  const t = L.readinessSummary([row({ date: '2026-06-09', defect_type: 'OPT POWER\n연결 누락' }), row({ date: '2026-09-17' })], { mapping: { date: '발생일' } });
+  assert.match(t, /기억하지 못했습니다/);
+  assert.match(t, /OPT POWER 연결 누락 1/);
+  assert.match(t, /\(101일, 약 3개월\)/);
 });
 
 console.log('\n' + passed + '개 통과' + (process.exitCode ? ' — 실패 있음' : ''));

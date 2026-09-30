@@ -9,9 +9,16 @@
 
   var db = S.loadDb();
   var imp = null;
-  var view = { from: '', to: '', part_no: '', defect_type: '', cause: '', process: '', customer: '', keyword: '', axis: 'defect_type', page: 0 };
+  // 이전 판에서 「완료여부」를 재발방지대책에 연결해 두었으면 불러올 때 진행상태로 옮겼습니다(store.js). 한 번 알리고 저장합니다.
+  var startNotice = '';
+  if (db._statusMoved != null) {
+    startNotice = '「완료여부」 열을 재발방지대책 대신 「진행상태」 칸으로 옮겼습니다' + (db._statusMoved ? '(이력 ' + db._statusMoved + '건의 완료·진행 값 포함)' : '') + '.';
+    delete db._statusMoved;
+  }
+  var view = { from: '', to: '', part_no: '', defect_type: '', cause: '', process: '', customer: '', source: '', keyword: '', axis: 'defect_type', page: 0 };
   var searchQ = { text: '', part_no: '', defect_type: '' };
   var dictField = 'defect_type';
+  var sugPick = {}, sugName = {}; // 묶기 제안: 표기별 선택(기본 = 확신 있는 것만), 고친 대표 이름
   var repView = { from: '', to: '', open: {} };
   var monthView = { from: '', to: '', month: '', measure: 'count' };
 
@@ -242,13 +249,13 @@
       outWrap));
 
     main.appendChild(h('section', { class: 'card' },
-      h('h2', null, '4. 2단계에서 만드는 것 — 순서'),
+      h('h2', null, '4. 2단계에서 만드는 것 — 순서 (2026-09-30 답 반영)'),
       h('ol', { class: 'next-detail' },
-        h('li', null, h('strong', null, '실제 이력에 맞추기'), ' — 받은 열 구성으로 열 맞추기 자동 추천, 분류 코드표로 표기 사전, 품질팀 기준으로 반복·다발 기준과 유사 검색 점수를 고칩니다. 자료를 받는 대로 바로 합니다.'),
-        h('li', null, h('strong', null, '대책서에서 항목 뽑기'), ' — 개선대책서·재발방지대책 문서에서 불량현상·발생원인·개선대책·재발방지대책을 뽑아 이력에 합칩니다. 유사 불량 검색에 문서 내용도 걸립니다.'),
-        h('li', null, h('strong', null, '문서 근거 질의(RAG)'), ' — 대책서·사내 표준을 근거로 「이 현상의 과거 원인과 대책은?」을 묻고, 답에 근거 문서를 붙입니다. 외부 AI 허용 여부(10장 9번)에 따라 NotebookLM·Dify 또는 사내 허용 AI 로 정합니다.'),
-        h('li', null, h('strong', null, '사진으로 현상 쓰기'), ' — 사진을 AI 에 보여 주고 불량현상 문장 초안을 받는 반자동 화면부터 만듭니다. 유형별 사진이 충분히 모이면 사진으로 불량유형을 제안하는 자동 분류로 넓힙니다(기획서 3단계).'),
-        h('li', null, h('strong', null, 'KPI·알림'), ' — 불량률 분모(생산 수량)와 KPI 계산식을 받으면 월간 KPI 보고서를, 보안이 허용되면 반복·다발 알림(Make)을 붙입니다.'))));
+        h('li', null, h('strong', null, '① 실제 이력에 맞추기 — 반영함'), ' — 실제 열 연결을 「저장된 양식」으로 넣었습니다(불러오기 화면). 불량유형·원인 분류가 자유 기재라 「표기 정리」에 비슷한 표기를 묶자고 제안하는 「묶기 제안」을 더했고, 반복·다발 기준을 「같은 품번 또는 같은 불량유형이 2건 이상」으로 바꿨습니다. 유사 검색은 「터미널」과 「단자」를 같은 말로 봅니다. 공정불량 이력 LIST 도 자료 구분을 골라 함께 불러올 수 있습니다.'),
+        h('li', null, h('strong', null, '② 대책서에서 항목 뽑기 — 다음'), ' — 대책서가 주로 Excel 이라, 브라우저에서 대책서 Excel 을 열어 「불량현상」「발생원인」「개선대책」「재발방지대책」 같은 제목 칸 옆(또는 아래) 칸을 읽어 이력에 붙입니다. 하자NO.(없으면 품번+발생일)로 이력과 잇습니다. 메일로 보내 주실 대책서 3건의 양식을 보고 만듭니다.'),
+        h('li', null, h('strong', null, '③ 문서 근거 질의(RAG)'), ' — 외부 AI 사용이 가능하다고 하셔서 NotebookLM 에 대책서·불량 LIST 를 올려 묻는 방식부터 안내합니다.'),
+        h('li', null, h('strong', null, '사진 — 보류'), ' — 지금은 불량 사진이 없어 사진으로 현상 쓰기·자동 분류는 사진이 모이면 시작합니다. 사진은 품번·발생일자·이슈번호로 관리하신다고 하니, 파일 이름에 하자NO. 를 넣어 두시면 이력과 바로 이을 수 있습니다.'),
+        h('li', null, h('strong', null, 'KPI — 만들지 않음'), ' — 답에 따라 월간 KPI 보고서는 만들지 않습니다. 혼자 쓰신다고 하여 공유 저장소도 두지 않고 이 브라우저에 저장합니다.'))));
   }
   function renderList(main) {
     main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '품질 이력'),
@@ -302,20 +309,22 @@
       cause: select('cause', [['', '전체']].concat(L.valuesOf(all, L.causeKey)), view.cause),
       process: select('process', [['', '전체']].concat(L.valuesOf(all, 'process')), view.process),
       customer: select('customer', [['', '전체']].concat(L.valuesOf(all, 'customer')), view.customer),
+      source: select('source', [['', '전체']].concat(L.valuesOf(all, L.sourceOf)), view.source),
       keyword: h('input', { type: 'search', value: view.keyword, placeholder: '현상·원인·대책 낱말' })
     };
     Object.keys(ctl).forEach(function (k) {
       ctl[k].addEventListener('change', function () { view[k] = ctl[k].value; view.page = 0; render(); });
     });
     add(f, [field('시작일', ctl.from), field('종료일', ctl.to), field('품번', ctl.part_no), field('불량유형', ctl.defect_type),
-      field('원인', ctl.cause), field('공정', ctl.process), field('고객사', ctl.customer), field('낱말 찾기', ctl.keyword)]);
+      field('원인', ctl.cause), field('공정', ctl.process), field('고객사', ctl.customer),
+      L.valuesOf(all, L.sourceOf).length > 1 || view.source ? field('자료', ctl.source) : null, field('낱말 찾기', ctl.keyword)]);
     card.appendChild(f);
     var rows = L.filterRows(all, view).sort(byDateDesc);
-    var anyFilter = ['from', 'to', 'part_no', 'defect_type', 'cause', 'process', 'customer', 'keyword'].some(function (k) { return view[k]; });
+    var anyFilter = ['from', 'to', 'part_no', 'defect_type', 'cause', 'process', 'customer', 'source', 'keyword'].some(function (k) { return view[k]; });
     card.appendChild(h('div', { class: 'list-meta' },
       h('span', null, '전체 ' + all.length + '건 중 ' + rows.length + '건 · 불량수량 ' + fmt(rows.reduce(function (s, r) { return s + (r.qty || 0); }, 0))),
       anyFilter ? h('button', { type: 'button', class: 'btn', onclick: function () {
-        ['from', 'to', 'part_no', 'defect_type', 'cause', 'process', 'customer', 'keyword'].forEach(function (k) { view[k] = ''; });
+        ['from', 'to', 'part_no', 'defect_type', 'cause', 'process', 'customer', 'source', 'keyword'].forEach(function (k) { view[k] = ''; });
         render();
       } }, '거르기 풀기') : null));
     main.appendChild(card);
@@ -490,9 +499,17 @@
     });
     return list;
   }
+  // 자료 구분마다 따로 기억한 열 연결(품질불량 이력은 db.mapping, 그 밖은 db.mappingBySource)
+  function savedMapping(source) {
+    if (source === L.SOURCES[0]) return db.mapping;
+    return (db.mappingBySource || {})[source] || {};
+  }
   function startImport(files) {
-    imp = { files: files, mapping: {}, mode: db.rows.length && !db._sample ? 'append' : 'replace' };
-    imp.mapping = L.autoMap(importHeaders(), db.mapping);
+    var src = L.guessSource(files.map(function (f) { return f.name; }).join(' '));
+    imp = { files: files, mapping: {}, source: src, preset: '', mode: db.rows.length && !db._sample ? 'append' : 'replace' };
+    imp.mapping = L.autoMap(importHeaders(), savedMapping(src), { source: src });
+    var pre = L.pickPreset(importHeaders(), src);
+    imp.preset = pre ? pre.id : '';
     if (location.hash === '#/import') render(); else location.hash = '#/import';
   }
   function convertImport() {
@@ -513,7 +530,7 @@
     var sheetCard = h('section', { class: 'card' }, h('h2', null, '1. 가져올 시트'),
       h('p', { class: 'note' }, '머리행(열 이름이 적힌 줄)을 자동으로 찾았습니다. 다르면 줄 번호를 고치세요. 안내·요약 시트는 빼 주세요.'));
     var ul = h('ul', { class: 'sheet-list' });
-    function remap() { imp.mapping = L.autoMap(importHeaders(), Object.assign({}, db.mapping, imp.mapping)); }
+    function remap() { imp.mapping = L.autoMap(importHeaders(), Object.assign({}, savedMapping(imp.source), imp.mapping), { source: imp.source }); }
     imp.files.forEach(function (f) {
       if (f.error) { ul.appendChild(h('li', { class: 'alert error' }, f.name + ' — ' + f.error)); return; }
       f.sheets.forEach(function (s) {
@@ -529,13 +546,37 @@
     main.appendChild(sheetCard);
 
     var headers = importHeaders();
-    var mapCard = h('section', { class: 'card' }, h('h2', null, '2. 열 맞추기'),
-      h('p', { class: 'note' }, '표준 항목마다 내 파일의 어느 열인지 고릅니다. 없는 항목은 「(없음)」으로 두면 됩니다. 불러오면 이 연결을 저장해 다음에 같은 열 이름을 자동으로 연결합니다.'));
+    var mapCard = h('section', { class: 'card' }, h('h2', null, '2. 어떤 자료인지 고르고 열 맞추기'),
+      h('p', { class: 'note' }, '표준 항목마다 내 파일의 어느 열인지 고릅니다. 없는 항목은 「(없음)」으로 두면 됩니다. 불러오면 이 연결을 자료 구분별로 저장해 다음에 같은 열 이름을 자동으로 연결합니다.'));
+    // 자료 구분 — 품질불량 이력과 공정불량 이력 LIST 를 함께 불러와 나눠 보거나 합쳐 볼 수 있습니다(10장 4번 답).
+    var srcSel = select('import_source', L.SOURCES, imp.source);
+    srcSel.addEventListener('change', function () {
+      imp.source = srcSel.value;
+      imp.mapping = L.autoMap(importHeaders(), savedMapping(imp.source), { source: imp.source });
+      var p2 = L.pickPreset(importHeaders(), imp.source); imp.preset = p2 ? p2.id : '';
+      render();
+    });
+    var presets = L.MAPPING_PRESETS.filter(function (p) { return p.source === imp.source; });
+    var preSel = select('import_preset', [['', '(양식 쓰지 않음)']].concat(presets.map(function (p) { return [p.id, p.label]; })), imp.preset);
+    var preBtn = h('button', { type: 'button', class: 'btn', onclick: function () {
+      var p = L.MAPPING_PRESETS.filter(function (x) { return x.id === preSel.value; })[0];
+      if (!p) return;
+      imp.preset = p.id;
+      imp.mapping = L.autoMap(importHeaders(), null, { preset: p });
+      var n = Object.keys(L.applyPreset(importHeaders(), p)).length;
+      toast('저장된 양식으로 ' + n + '개 열을 연결했습니다' + (n < Object.keys(p.mapping).length ? ' — 파일에 없는 열이 ' + (Object.keys(p.mapping).length - n) + '개 있습니다' : ''));
+      render();
+    } }, '이 양식으로 다시 맞추기');
+    mapCard.appendChild(h('div', { class: 'form-grid' },
+      field('이 파일은', srcSel, imp.source === L.SOURCES[1] ? '공정불량 이력 LIST 는 열 구성을 받으면 양식을 저장해 둡니다. 지금은 직접 맞춰 주세요.' : null),
+      field('저장된 양식', preSel, presets.length ? '실제 이력의 열 연결(하자NO.·불량내용·대책수립 진행결과 등)을 저장해 두었습니다.' : '이 자료의 저장된 양식은 아직 없습니다.'),
+      h('div', { class: 'field' }, h('span', null, '\u00a0'), preBtn)));
     var grid = h('div', { class: 'map-grid' });
     L.STD_FIELDS.forEach(function (f) {
+      if (f.key === 'source' && !imp.mapping.source) return; // 자료 구분은 위에서 고름(파일에 그 열이 있을 때만 연결)
       var s = select('map_' + f.key, [['', '(없음)']].concat(headers), imp.mapping[f.key] || '');
       s.addEventListener('change', function () { if (s.value) imp.mapping[f.key] = s.value; else delete imp.mapping[f.key]; render(); });
-      var hint = f.key === 'cause_cat' ? '원인을 분류 코드로 따로 적는 열이 있을 때만' : null;
+      var hint = f.key === 'cause_cat' ? '원인을 분류 코드로 따로 적는 열이 있을 때만' : f.key === 'status' ? '「완료여부」처럼 대책 진행 상태를 적는 열' : f.key === 'prevention' ? '재발방지대책 문장 열(완료여부는 진행상태에)' : null;
       grid.appendChild(field(f.label + (f.required ? ' (필수)' : ''), s, hint));
     });
     mapCard.appendChild(grid);
@@ -568,7 +609,9 @@
       h('button', { type: 'button', class: 'btn btn-primary', disabled: !imp.mapping.date || !conv.rows.length, onclick: function () {
         var c = convertImport();
         var wasSample = db._sample;
-        db.mapping = Object.assign({}, imp.mapping);
+        c.rows.forEach(function (r) { if (!r.source) r.source = imp.source; });
+        if (imp.source === L.SOURCES[0]) db.mapping = Object.assign({}, imp.mapping);
+        else { db.mappingBySource = db.mappingBySource || {}; db.mappingBySource[imp.source] = Object.assign({}, imp.mapping); }
         db.headers = importHeaders(); // 열 이름만 기억합니다(「다음 단계」 요약 글용). 값은 넣지 않습니다.
         if (wasSample) db.dict = L.emptyDb().dict;
         addRows(c.rows, imp.mode === 'replace' || wasSample);
@@ -581,6 +624,68 @@
     main.appendChild(prev);
   }
   // ── 표기 정리 ─────────────────────────────────────────────
+  // 셀 안 줄바꿈은 「↵」로 보여 줍니다(원래 표기가 어떻게 적혔는지 알 수 있게).
+  function showSpell(x) { return String(x).replace(/\s*\n\s*/g, ' ↵ '); }
+  // 묶기 제안(2026-09-30) — 자유 기재 유형의 비슷한 표기를 묶자고 제안하고, 사용자가 확인한 것만 사전에 넣습니다.
+  function suggestBlock(fieldKey) {
+    var sg = L.suggestGroups(db.rows, fieldKey, db.dict);
+    var wrap = h('div', { class: 'suggest-wrap' },
+      h('h2', null, '묶기 제안'),
+      h('p', { class: 'note' }, '띄어쓰기·줄바꿈을 무시하고, 괄호 안 보충 설명(「단자 밀림(미삽입)」)과 앞의 영문 부위 이름(「LIGHT SW」「MPT」)을 빼고, 같은 말(터미널 = 단자)을 맞춘 뒤 같아지는 표기끼리 묶자고 제안합니다. 제안일 뿐이며, 확인하고 누른 것만 사전에 들어갑니다. 원래 이력은 바뀌지 않습니다.'));
+    function pickOf(gid, m) { var k = gid + '|' + m.key; return Object.prototype.hasOwnProperty.call(sugPick, k) ? sugPick[k] : m.sure; }
+    var open = sg.groups.filter(function (g) { return !g.done; });
+    var openM = sg.merges.filter(function (m) { return !m.done; });
+    if (!open.length && !openM.length) wrap.appendChild(h('p', null, sg.groups.length || sg.merges.length ? '제안한 묶음을 모두 사전에 넣었습니다.' : '묶자고 제안할 비슷한 표기가 없습니다.'));
+    open.forEach(function (g) {
+      var nameIn = h('input', { type: 'text', value: sugName[g.id] || g.name, 'aria-label': '묶음 대표 이름' });
+      nameIn.addEventListener('change', function () { sugName[g.id] = nameIn.value.trim(); });
+      var ul = h('ul', { class: 'suggest-members' });
+      g.members.forEach(function (m) {
+        var cb = h('input', { type: 'checkbox', checked: pickOf(g.id, m), onchange: function () { sugPick[g.id + '|' + m.key] = cb.checked; var y = window.scrollY; render(); window.scrollTo(0, y); } });
+        ul.appendChild(h('li', null, h('label', { class: 'check' }, cb, h('span', null, h('strong', null, showSpell(m.spelling)), ' ', h('span', { class: 'note' }, m.count + '건'),
+          m.sure ? null : [' ', h('span', { class: 'badge warn' }, '확인 필요')],
+          m.current && m.current !== (sugName[g.id] || g.name) ? [' ', h('span', { class: 'badge ok' }, '지금 사전: ' + m.current)] : null,
+          m.steps.length ? h('small', { class: 'hint' }, m.steps.join(' · ')) : null))));
+      });
+      wrap.appendChild(h('div', { class: 'suggest' },
+        h('div', { class: 'suggest-head' }, h('span', null, '대표 이름'), nameIn, h('span', { class: 'note' }, '표기 ' + g.members.length + '가지 · ' + g.count + '건')),
+        ul,
+        h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-primary', onclick: function () {
+          var keys = g.members.filter(function (m) { return pickOf(g.id, m); }).map(function (m) { return m.key; });
+          if (keys.length < 1) { toast('묶을 표기를 하나 이상 골라 주세요', true); return; }
+          try { var n = L.applyGroup(db.dict, fieldKey, nameIn.value.trim() || g.name, keys); save(); toast('「' + (nameIn.value.trim() || g.name) + '」으로 ' + keys.length + '가지 표기를 묶었습니다' + (n ? '' : '(이미 묶여 있었습니다)')); render(); }
+          catch (e) { toast(e.message, true); }
+        } }, '고른 표기를 이 이름으로 묶기'))));
+    });
+    openM.forEach(function (m) {
+      var target = sugName[m.into] || m.intoName;
+      // 합칠 대상 묶음에서는 위에서 고른 표기만, 합쳐 들어오는 묶음은 전부
+      var tg = sg.groups.filter(function (g) { return g.id === m.into; })[0];
+      var tKeys = {};
+      if (tg) tg.members.forEach(function (x) { tKeys[x.key] = true; });
+      var mem = m.members.filter(function (x) { return !tKeys[x.key] || pickOf(m.into, x); });
+      wrap.appendChild(h('div', { class: 'suggest merge' },
+        h('p', null, h('span', { class: 'badge warn' }, '확인 필요'), ' ',
+          m.fromNames.map(function (n, i) { return [i ? ', ' : '', '「', h('strong', null, showSpell(n)), '」']; }), ' 을(를) 「', h('strong', null, target), '」에 합칠까요? ',
+          null),
+        h('p', { class: 'note' }, m.reason),
+        h('p', { class: 'note' }, '들어가는 표기: ' + mem.map(function (x) { return showSpell(x.spelling); }).join(' / ') + ' (' + mem.reduce(function (a, x) { return a + x.count; }, 0) + '건)'),
+        h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn', onclick: function () {
+          L.applyGroup(db.dict, fieldKey, target, mem.map(function (x) { return x.key; }));
+          save(); toast('「' + target + '」에 합쳤습니다'); render();
+        } }, '합쳐서 「' + target + '」으로 묶기'))));
+    });
+    var done = sg.groups.filter(function (g) { return g.done; }).concat(sg.merges.filter(function (m) { return m.done; }));
+    if (done.length) {
+      wrap.appendChild(h('details', { class: 'suggest-done' }, h('summary', null, '이미 사전에 넣은 제안 ' + done.length + '개'),
+        h('ul', { class: 'miss-list' }, done.map(function (g) {
+          var mem = g.members, nm = mem[0].current;
+          return h('li', null, h('strong', null, nm), ' ← ' + mem.map(function (x) { return showSpell(x.spelling); }).join(' / ') + ' ',
+            h('button', { type: 'button', class: 'btn', onclick: function () { L.removeGroup(db.dict, fieldKey, mem.map(function (x) { return x.key; })); save(); toast('묶음을 풀었습니다'); render(); } }, '풀기'));
+        }))));
+    }
+    return wrap;
+  }
   function renderDict(main) {
     if (!db.rows.length) { emptyNotice(main, '표기 정리'); return; }
     main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '표기 정리')));
@@ -591,6 +696,7 @@
       h('div', { class: 'axis-tabs', role: 'group', 'aria-label': '정리할 항목' }, fields.map(function (f) {
         return h('button', { type: 'button', 'aria-pressed': dictField === f[0] ? 'true' : 'false', onclick: function () { dictField = f[0]; render(); } }, f[1]);
       })));
+    card.appendChild(suggestBlock(dictField));
     var list = L.distinctValues(db.rows, dictField, db.dict);
     var names = L.valuesOf(cdata(), dictField);
     if (!list.length) card.appendChild(h('p', { class: 'note' }, '이 항목에 적힌 값이 없습니다.'));
@@ -609,7 +715,7 @@
           save(); toast('대표 이름을 저장했습니다'); render();
         });
         box.appendChild(h('div', { class: 'dict-row' },
-          h('div', { class: 'spell' }, e.spellings.map(function (s, i) { return [i ? ' / ' : '', h('strong', null, s)]; }), ' ', h('span', { class: 'note' }, e.count + '건'),
+          h('div', { class: 'spell' }, e.spellings.map(function (s, i) { return [i ? ' / ' : '', h('strong', null, showSpell(s))]; }), ' ', h('span', { class: 'note' }, e.count + '건'),
             e.mapped ? [' ', h('span', { class: 'badge ok' }, '사전')] : null),
           inp,
           e.mapped ? h('button', { type: 'button', class: 'btn', onclick: function () { delete db.dict[dictField][e.key]; save(); render(); } }, '되돌리기') : h('span')));
@@ -718,9 +824,10 @@
     main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '반복·다발 불량')));
     var rule = db.rule;
     var card = h('section', { class: 'card' }, h('h2', null, '탐지 기준'),
-      h('p', { class: 'note' }, '「같은 묶음이 N일 안에 M건 이상」이면 반복·다발로 표시합니다. 기준값은 품질팀 기준(기획서 10장 6번)을 받으면 그에 맞게 바꾸세요. 지금 값은 시작값일 뿐입니다.'));
+      h('p', { class: 'note' }, '「같은 묶음이 N일 안에 M건 이상」이면 반복·다발로 표시합니다. 처음 값은 받은 기준(2026-09-30, 기획서 10장 6번 답) — 「동일 품번 또는 동일 불량유형이 반복 발생」 — 에 맞춰 「같은 품번 또는 같은 불량유형 · 기간 제한 없음(0) · 2건 이상」입니다. 기간을 정하고 싶으면 N 에 날수를 넣으세요.'),
+      h('p', { class: 'note' }, '불량유형은 「표기 정리」에서 묶은 대표 이름으로 셉니다. 「터미널 밀림」「단자밀림」처럼 흩어진 표기를 먼저 묶어야 같은 유형의 반복이 드러납니다.'));
     var gb = select('groupBy', Object.keys(L.GROUP_BY).map(function (k) { return [k, L.GROUP_BY[k].label]; }), rule.groupBy);
-    var fd = h('input', { type: 'number', min: '1', step: '1', value: String(rule.days) });
+    var fd = h('input', { type: 'number', min: '0', step: '1', value: String(rule.days) });
     var fm = h('input', { type: 'number', min: '2', step: '1', value: String(rule.min) });
     var ff = h('input', { type: 'date', value: repView.from });
     var ft = h('input', { type: 'date', value: repView.to });
@@ -730,16 +837,19 @@
       save(); render();
     }
     [gb, fd, fm, ff, ft].forEach(function (el) { el.addEventListener('change', apply); });
-    card.appendChild(h('div', { class: 'filters' }, field('묶음 기준', gb), field('기간 N(일)', fd), field('건수 M(건 이상)', fm),
-      field('조회 시작일', ff, '비우면 전체'), field('조회 종료일', ft)));
+    var srcList = L.valuesOf(cdata(), L.sourceOf);
+    var fs = select('rep_source', [['', '전체']].concat(srcList), repView.source || '');
+    fs.addEventListener('change', function () { repView.source = fs.value; render(); });
+    card.appendChild(h('div', { class: 'filters' }, field('묶음 기준', gb), field('기간 N(일)', fd, '0 = 기간 제한 없음'), field('건수 M(건 이상)', fm),
+      field('조회 시작일', ff, '비우면 전체'), field('조회 종료일', ft), srcList.length > 1 ? field('자료', fs) : null));
     main.appendChild(card);
 
-    var rows = L.filterRows(cdata(), { from: repView.from, to: repView.to });
+    var rows = L.filterRows(cdata(), { from: repView.from, to: repView.to, source: repView.source || '' });
     var r = currentRepeats(rows);
     var out = h('section', { class: 'card' });
     if (r.error) { out.appendChild(h('div', { class: 'alert error' }, r.error)); main.appendChild(out); return; }
     out.appendChild(h('h2', null, '탐지 결과 ' + r.list.length + '건'));
-    out.appendChild(h('p', { class: 'note' }, L.GROUP_BY[rule.groupBy].label + ' 기준, ' + rule.days + '일 안에 ' + rule.min + '건 이상. 기간이 이어지는 건은 한 구간으로 묶었습니다. 최근 구간이 위에 옵니다.'));
+    out.appendChild(h('p', { class: 'note' }, ruleText(rule) + '. 기간이 이어지는 건은 한 구간으로 묶었습니다. 최근 구간이 위에 옵니다.' + (L.GROUP_BY[rule.groupBy].any ? ' 한 건이 품번 묶음과 불량유형 묶음에 함께 나올 수 있습니다.' : '')));
     if (!r.list.length) out.appendChild(h('p', null, '이 기준에 걸리는 반복·다발 불량이 없습니다.'));
     else {
       out.appendChild(h('div', { class: 'btn-row', style: 'margin-bottom:12px' },
@@ -862,10 +972,11 @@
           if (!hit.length) return h('p', { class: 'note' }, rr.error || '현재 탐지 기준(' + rule() + ')으로 걸린 것이 없습니다.');
           return h('ul', { class: 'miss-list' }, hit.map(function (e) { return h('li', null, h('strong', null, e.label), ' — ' + e.first + ' ~ ' + e.last + ', ' + e.count + '건'); }));
         })())),
-      h('p', { class: 'note', style: 'margin-top:12px' }, '불량률 같은 KPI는 사내 정의(분모가 되는 생산 수량 등)를 받은 뒤 2단계에서 더합니다.'));
+      h('p', { class: 'note', style: 'margin-top:12px' }, '불량률 같은 KPI 보고서는 만들지 않기로 했습니다(2026-09-30 답, 기획서 10장 7번). 월간 현황은 건수·수량만 냅니다.'));
     main.appendChild(mCard);
   }
-  function rule() { return L.GROUP_BY[db.rule.groupBy].label + ', ' + db.rule.days + '일 안 ' + db.rule.min + '건 이상'; }
+  function ruleText(r) { return L.GROUP_BY[r.groupBy].label + ', ' + (+r.days ? r.days + '일 안 ' : '기간 제한 없이 ') + r.min + '건 이상'; }
+  function rule() { return ruleText(db.rule); }
 
   // ── 대책서 초안 ───────────────────────────────────────────
   function renderDraft(main) {
@@ -875,7 +986,7 @@
     var all = cdata();
     main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '대책서 초안 프롬프트')));
     main.appendChild(h('div', { class: 'steps-bar' }, h('b', null, '1. 새 불량 정보'), '→', h('b', null, '2. 붙일 과거 이력 고르기'), '→', h('b', null, '3. 프롬프트 복사'), '→', h('b', null, '4. AI 답변 붙여넣기')));
-    main.appendChild(h('div', { class: 'alert info' }, '이 도구는 AI를 직접 부르지 않습니다. 만든 프롬프트를 사내에서 허용된 AI에만 붙여넣으세요. 고객사명·품번 등 민감한 내용은 규정에 따라 지우고 보내세요.'));
+    main.appendChild(h('div', { class: 'alert info' }, '이 도구는 AI를 직접 부르지 않습니다. 만든 프롬프트를 ChatGPT 등 생성형 AI 에 붙여넣으세요(외부 AI 사용 가능 — 2026-09-30 답). 고객사명·품번 등은 회사 규정에 따라 필요하면 지우고 보내세요.'));
 
     // 1. 입력
     var inCard = h('section', { class: 'card' }, h('h2', null, '1. 새 불량 정보'));
@@ -975,4 +1086,6 @@
   }
 
   render();
+  if (startNotice) { save(); toast(startNotice); }
+  else if (db.rows.length) save(); // 옛 반복 기준(30일 3건) 등 불러올 때 바꾼 값을 저장
 })();
